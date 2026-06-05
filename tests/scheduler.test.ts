@@ -107,6 +107,128 @@ describe("scheduled publishing", () => {
     );
   });
 
+  it("publishes due scheduled posts with direct production photo URLs", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 26,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Scheduled album",
+        active_from: "2026-06-04T13:00:00.000Z",
+        all_properties: {
+          PHOTOS: [
+            {
+              id: "253901",
+              url: "https://example.com/upload/one.jpg",
+              path: "/upload/one.jpg"
+            },
+            {
+              id: "253902",
+              url: "https://example.com/upload/two with spaces.jpg",
+              path: "/upload/two with spaces.jpg"
+            }
+          ]
+        }
+      }
+    });
+
+    const scheduled = await processBitrixEvent(event, {
+      db,
+      telegram,
+      now: new Date("2026-06-04T12:00:00.000Z")
+    });
+    const result = await runDuePosts({
+      db,
+      telegram,
+      now: new Date("2026-06-04T13:00:00.000Z")
+    });
+
+    expect(scheduled.status).toBe("scheduled");
+    expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/upload/one.jpg",
+      "https://example.com/upload/two with spaces.jpg"
+    ]);
+  });
+
+  it("publishes the latest text and photos when a scheduled post is edited before it is due", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 27,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Scheduled old text",
+        active_from: "2026-06-04T13:00:00.000Z",
+        all_properties: {
+          PHOTOS: [
+            {
+              id: "old",
+              url: "https://example.com/upload/old.jpg",
+              path: "/upload/old.jpg"
+            }
+          ]
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 27,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Scheduled latest text",
+        active_from: "2026-06-04T13:00:00.000Z",
+        all_properties: {
+          PHOTOS: [
+            {
+              id: "new-1",
+              url: "https://example.com/upload/new 1.jpg",
+              path: "/upload/new 1.jpg"
+            },
+            {
+              id: "new-2",
+              url: "https://example.com/upload/new 2.jpg",
+              path: "/upload/new 2.jpg"
+            }
+          ]
+        }
+      }
+    });
+
+    await processBitrixEvent(first, {
+      db,
+      telegram,
+      now: new Date("2026-06-04T12:00:00.000Z")
+    });
+    const updated = await processBitrixEvent(second, {
+      db,
+      telegram,
+      now: new Date("2026-06-04T12:30:00.000Z")
+    });
+    expect(updated.status).toBe("scheduled");
+    expect(telegram.calls).toHaveLength(0);
+
+    const result = await runDuePosts({
+      db,
+      telegram,
+      now: new Date("2026-06-04T13:00:00.000Z")
+    });
+
+    expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(db.posts[0].sourceText).toBe("Scheduled latest text");
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/upload/new 1.jpg",
+      "https://example.com/upload/new 2.jpg"
+    ]);
+  });
+
   it("cancels a pending scheduled post when Bitrix later marks it inactive", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();

@@ -38,11 +38,12 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-06-05 12:57+03:00) Hardened Telegram photo delivery: `sendPhoto`, `sendMediaGroup`, and `editMessageMedia` first try encoded HTTPS URLs, then fall back to downloading each Bitrix photo from the service host and uploading it to Telegram through multipart when Telegram reports an HTTP URL fetch/media error.
 - [x] (2026-06-05 13:21+03:00) Switched the production default photo delivery mode to service-side upload via `TELEGRAM_PHOTO_DELIVERY_MODE=upload`; URL-first behavior remains available as `auto` or `url`, and failed webhook processing now writes a redacted per-`bitrixId` warning to the service log.
 - [x] (2026-06-05 13:50+03:00) Fixed photo detection before Telegram: parser now recognizes Bitrix/PHP photo variants with `URL`, `SRC`, `ID`, `FILE_ID`, `VALUE` wrappers, numeric object maps, JSON-string photo arrays, comma-separated file ids, and `preview_picture`/`detail_picture` fallbacks. Webhook logs now include `photoCount`, `photoIds`, and `unresolvedPhotoCount` for every parsed event.
+- [x] (2026-06-05 14:25+03:00) Fixed production scheduling time semantics: Bitrix local date strings without explicit timezone are parsed with `BITRIX_LOCAL_UTC_OFFSET_MINUTES=180`, `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true` blocks active/social posts without an exact time, invalid time values preserve source details for admin notifications, and the scheduler logs non-empty worker results.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
 - [x] (2026-06-04 12:31+03:00) Validate scheduled publishing worker with a controlled clock and database rows.
-- [ ] Validate end to end with sample webhook payloads and Telegram test chat.
+- [x] (2026-06-05 14:25+03:00) Validate end to end with sample webhook payloads and Telegram test chat.
 
 ## Surprises & Discoveries
 
@@ -145,9 +146,9 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: The sample webhook still does not contain the field, but these are the standard Bitrix names. Supporting both lets the service work with common Bitrix/n8n mappings without hiding the need to confirm the production payload.
   Date/Author: 2026-06-04 / Codex
 
-- Decision: Parse Bitrix `DD.MM.YYYY HH:MM:SS` timestamps as local service time when no timezone is present.
-  Rationale: Bitrix often emits localized date strings. Until the production payload confirms an explicit timezone/offset, local service time is the least surprising default for a single-server MVP.
-  Date/Author: 2026-06-04 / Codex
+- Decision: Parse Bitrix `DD.MM.YYYY HH:MM:SS` timestamps with a configurable Bitrix local UTC offset when no timezone is present.
+  Rationale: The production server runs on Linux/UTC while Bitrix sends local Moscow-style strings such as `11.06.2026 00:05:00`. `BITRIX_LOCAL_UTC_OFFSET_MINUTES=180` makes scheduling independent from the VPS process timezone; explicit timezone strings still use their own offset.
+  Date/Author: 2026-06-05 / Codex
 
 - Decision: Use `soft` media sync as the default edit policy.
   Rationale: Soft sync avoids deleting visible Telegram messages: it edits single photos or album items by index, edits captions only when changed, and sends newly added album photos as extra messages. If Bitrix removes photos, old Telegram media remains visible unless production explicitly chooses `rebuild`.
@@ -252,6 +253,8 @@ The first application scaffold is complete. The project now has a TypeScript/Fas
 2026-06-05 verification: after adding multipart upload fallback for Telegram photo URL fetch failures, `npm test` passed 79 tests in 10 files and `npm run build` passed. After changing the default to upload-first delivery and adding failed-result logging, `npm test` passed 82 tests in 10 files and `npm run build` passed.
 
 2026-06-05 verification: after broadening Bitrix/PHP photo parsing and adding parsed-event photo diagnostics, `npm test` passed 90 tests in 10 files and `npm run build` passed.
+
+2026-06-05 verification: after fixing Bitrix local-time parsing and exact-time enforcement, `npm test` passed 97 tests in 10 files and `npm run build` passed. A real local Telegram E2E run also passed without printing secrets: the service stored a future `active_from` post with two local URL photos containing spaces, `runDuePosts` published it through upload-first `sendMediaGroup`, a text change edited the album caption, photo removal rebuilt the album into a text post, and `active=N` deleted the remaining Telegram message.
 
 Additional verification on 2026-06-04 at 13:22+03:00: `npm test` passed 32 tests in 7 files. A real Telegram soft-flow run in the test channel validated single-photo media edit, album item edit, appended extra photo, and shrink/no-op behavior under `soft`; created messages `38,39,40,41` were deleted successfully during cleanup. Remaining production-specific choices are exact Bitrix activity-start field and timezone, public URL field, exact meaning/routing of `pub_news_social`, and whether production wants the default non-destructive `soft` policy or explicit `rebuild` when photos are removed.
 

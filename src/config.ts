@@ -11,6 +11,27 @@ const emptyToUndefined = (value: unknown) => {
   return value;
 };
 
+const booleanFromEnv = (defaultValue: boolean) =>
+  z.preprocess((value) => {
+    const normalized = emptyToUndefined(value);
+    if (normalized === undefined || typeof normalized === "boolean") {
+      return normalized;
+    }
+
+    if (typeof normalized === "string") {
+      const text = normalized.trim().toLowerCase();
+      if (["1", "true", "yes", "y", "on"].includes(text)) {
+        return true;
+      }
+
+      if (["0", "false", "no", "n", "off"].includes(text)) {
+        return false;
+      }
+    }
+
+    return normalized;
+  }, z.boolean().default(defaultValue));
+
 const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(18080),
   NODE_ENV: z.string().default("development"),
@@ -32,6 +53,8 @@ const EnvSchema = z.object({
   OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
   WEBHOOK_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
   BITRIX_ACTIVE_FROM_FIELD: z.preprocess(emptyToUndefined, z.string().optional()),
+  BITRIX_REQUIRE_EXACT_ACTIVE_FROM: booleanFromEnv(true),
+  BITRIX_LOCAL_UTC_OFFSET_MINUTES: z.coerce.number().int().default(180),
   BITRIX_FILE_RESOLVER_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   TELEGRAM_PARSE_MODE: z.enum(["plain", "html", "markdownv2"]).default("plain"),
   TELEGRAM_MEDIA_SYNC_POLICY: z.enum(["soft", "rebuild"]).default("rebuild"),
@@ -97,6 +120,8 @@ export function loadConfig(
     openAiModel: parsed.OPENAI_MODEL,
     webhookSecret: parsed.WEBHOOK_SECRET,
     bitrixActiveFromField: parsed.BITRIX_ACTIVE_FROM_FIELD,
+    bitrixRequireExactActiveFrom: parsed.BITRIX_REQUIRE_EXACT_ACTIVE_FROM,
+    bitrixLocalUtcOffsetMinutes: parsed.BITRIX_LOCAL_UTC_OFFSET_MINUTES,
     bitrixFileResolverUrl: parsed.BITRIX_FILE_RESOLVER_URL,
     telegramParseMode,
     telegramMediaSyncPolicy: parsed.TELEGRAM_MEDIA_SYNC_POLICY,

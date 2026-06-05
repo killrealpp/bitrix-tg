@@ -120,3 +120,18 @@ photo state uses the resolved `{ id, url, path }` values.
 If any photo remains unresolved, the service must not publish a text-only
 fallback. It stores `failed`, keeps the unresolved photo ids in state for audit,
 and sends an admin notification when `TELEGRAM_ADMIN_CHAT_ID` is configured.
+
+## 2026-06-05 / Release Rule: Exact Time Required By Default
+
+For the release service, active social posts require an exact activity-start
+time by default. This is controlled by:
+
+```env
+BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true
+BITRIX_LOCAL_UTC_OFFSET_MINUTES=180
+```
+
+`active_from: "11.06.2026 00:05:00"` is valid and is scheduled. Missing
+`active_from`, date-only values such as `"11.06.2026"`, or invalid date strings
+produce `failed`, skip Telegram publication, and notify the admin when the admin
+chat is configured.

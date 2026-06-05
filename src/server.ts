@@ -5,7 +5,8 @@ import type { FastifyInstance } from "fastify";
 import { loadConfig, type AppConfig } from "./config";
 import {
   BitrixWebhookParseError,
-  parseBitrixWebhook
+  parseBitrixWebhook,
+  type ParsedBitrixEvent
 } from "./bitrix/parseWebhook";
 import {
   HttpBitrixPhotoResolver,
@@ -38,6 +39,8 @@ export interface BuildAppDeps {
       | "telegramBotToken"
       | "telegramAdminChatId"
       | "bitrixActiveFromField"
+      | "bitrixRequireExactActiveFrom"
+      | "bitrixLocalUtcOffsetMinutes"
       | "bitrixFileResolverUrl"
       | "telegramMediaSyncPolicy"
     >
@@ -95,7 +98,8 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
 
     try {
       const events = parseBitrixWebhook(request.body, {
-        activeFromField: deps.config.bitrixActiveFromField
+        activeFromField: deps.config.bitrixActiveFromField,
+        activeFromUtcOffsetMinutes: deps.config.bitrixLocalUtcOffsetMinutes
       });
       const results: ProcessResult[] = [];
       logParsedEvents(app, events);
@@ -107,11 +111,13 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
             telegram: deps.telegram,
             adminNotifier: deps.adminNotifier,
             photoResolver: deps.photoResolver,
-            mediaSyncPolicy: deps.config.telegramMediaSyncPolicy
+            mediaSyncPolicy: deps.config.telegramMediaSyncPolicy,
+            requireExactScheduleTime:
+              deps.config.bitrixRequireExactActiveFrom ?? false
           })
         );
       }
-      logFailedProcessingResults(app, results, logSecrets);
+      logProcessingResults(app, events, results, logSecrets);
 
       return {
         ok: true,
@@ -144,8 +150,15 @@ function logParsedEvents(
   app: FastifyInstance,
   events: Array<{
     bitrixId: number;
+    isActive: boolean;
+    activeRaw: string;
+    scheduledAt: Date | null;
+    scheduledAtSourceField: string | null;
+    scheduledAtRawValue: string | null;
+    scheduledAtPrecision: string | null;
     photos: Array<{
       id?: string;
+      url?: string;
       unresolved?: boolean;
     }>;
   }>
@@ -154,10 +167,21 @@ function logParsedEvents(
     app.log.info(
       {
         bitrixId: event.bitrixId,
+        isActive: event.isActive,
+        activeRaw: event.activeRaw,
+        scheduledAt: event.scheduledAt?.toISOString() ?? null,
+        scheduledAtSourceField: event.scheduledAtSourceField,
+        scheduledAtRawValue: event.scheduledAtRawValue,
+        scheduledAtPrecision: event.scheduledAtPrecision,
         photoCount: event.photos.length,
+        photoUrlCount: event.photos.filter((photo) => Boolean(photo.url)).length,
         photoIds: event.photos
           .map((photo) => photo.id)
           .filter((id): id is string => Boolean(id)),
+        photoUrls: event.photos
+          .map((photo) => photo.url)
+          .filter((url): url is string => Boolean(url))
+          .slice(0, 5),
         unresolvedPhotoCount: event.photos.filter((photo) => photo.unresolved)
           .length
       },
@@ -166,27 +190,61 @@ function logParsedEvents(
   }
 }
 
-function logFailedProcessingResults(
+function logProcessingResults(
   app: FastifyInstance,
+  events: ParsedBitrixEvent[],
   results: ProcessResult[],
   logSecrets: string[]
 ): void {
-  for (const result of results) {
-    if (result.status !== "failed") {
-      continue;
+  results.forEach((result, index) => {
+    const event = events[index];
+    const payload = {
+      bitrixId: result.bitrixId,
+      status: result.status,
+      reason: result.reason,
+      messageIds: result.messageIds,
+      error: result.error
+        ? redactSensitiveText(result.error, logSecrets)
+        : undefined,
+      photoCount: event?.photos.length,
+      photoUrlCount: event?.photos.filter((photo) => Boolean(photo.url)).length,
+      unresolvedPhotoCount: event?.photos.filter((photo) => photo.unresolved)
+        .length,
+      scheduledAt: event?.scheduledAt?.toISOString() ?? null,
+      scheduledAtRawValue: event?.scheduledAtRawValue,
+      scheduledAtPrecision: event?.scheduledAtPrecision,
+      expectedTelegramMethod: event ? expectedTelegramMethod(event) : undefined
+    };
+
+    if (result.status === "failed") {
+      app.log.warn(payload, "Bitrix event processing failed");
+      return;
     }
 
-    app.log.warn(
-      {
-        bitrixId: result.bitrixId,
-        reason: result.reason,
-        error: result.error
-          ? redactSensitiveText(result.error, logSecrets)
-          : undefined
-      },
-      "Bitrix event processing failed"
-    );
+    app.log.info(payload, "Bitrix event processing completed");
+  });
+}
+
+function expectedTelegramMethod(event: ParsedBitrixEvent): string {
+  if (!event.isActive || isSocialValueMissing(event)) {
+    return "none";
   }
+
+  if (event.photos.length === 0) {
+    return "sendMessage";
+  }
+
+  if (event.photos.length === 1) {
+    return "sendPhoto";
+  }
+
+  return "sendMediaGroup";
+}
+
+function isSocialValueMissing(event: ParsedBitrixEvent): boolean {
+  return Array.isArray(event.socialValue)
+    ? event.socialValue.length === 0
+    : event.socialValue.trim() === "";
 }
 
 function isValidWebhookSecret(
@@ -254,7 +312,17 @@ export async function startServer(): Promise<void> {
   });
 
   const scheduler = setInterval(() => {
-    void runDuePosts({ db, telegram, adminNotifier, photoResolver }).catch((error) => {
+    void (async () => {
+      const result = await runDuePosts({
+        db,
+        telegram,
+        adminNotifier,
+        photoResolver
+      });
+      if (result.checked > 0 || result.published > 0 || result.failed > 0) {
+        app.log.info({ result }, "Scheduled publishing worker result");
+      }
+    })().catch((error) => {
       app.log.error(
         { err: redactErrorForLog(error, logSecrets) },
         "Scheduled publishing worker failed"

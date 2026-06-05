@@ -337,6 +337,58 @@ describe("parseBitrixWebhook", () => {
     expect(event.scheduledAt?.getSeconds()).toBe(30);
   });
 
+  it("parses Bitrix local activity start with a configured UTC offset", () => {
+    const [bitrixDateEvent] = parseBitrixWebhook(
+      {
+        body: {
+          element_id: 48,
+          active: "Y",
+          pub_news_social: "2976",
+          active_from: "04.06.2026 13:45:30"
+        }
+      },
+      {
+        activeFromUtcOffsetMinutes: 180
+      }
+    );
+    const [isoLikeEvent] = parseBitrixWebhook(
+      {
+        body: {
+          element_id: 49,
+          active: "Y",
+          pub_news_social: "2976",
+          active_from: "2026-06-04 13:45:30"
+        }
+      },
+      {
+        activeFromUtcOffsetMinutes: 180
+      }
+    );
+
+    expect(bitrixDateEvent.scheduledAt?.toISOString()).toBe(
+      "2026-06-04T10:45:30.000Z"
+    );
+    expect(isoLikeEvent.scheduledAt?.toISOString()).toBe(
+      "2026-06-04T10:45:30.000Z"
+    );
+  });
+
+  it("keeps invalid activity start source details for admin notifications", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 50,
+        active: "Y",
+        pub_news_social: "2976",
+        active_from: "not a date"
+      }
+    });
+
+    expect(event.scheduledAt).toBeNull();
+    expect(event.scheduledAtSourceField).toBe("active_from");
+    expect(event.scheduledAtRawValue).toBe("not a date");
+    expect(event.scheduledAtPrecision).toBeNull();
+  });
+
   it("marks date-only Bitrix activity start as lacking exact time", () => {
     const [event] = parseBitrixWebhook({
       body: {

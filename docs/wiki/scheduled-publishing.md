@@ -66,3 +66,25 @@ scheduled worker also attempts the same resolver step before Telegram calls. If
 resolution fails or returns no URL, the due row follows the existing scheduled
 failure policy: one delayed retry, then `failed` plus admin notification when the
 admin chat is configured.
+
+## 2026-06-05 / Production Timezone And Exact Time
+
+Production Bitrix timestamps without an explicit timezone are treated as Bitrix
+local time, not as the VPS process timezone. The release default is:
+
+```env
+BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true
+BITRIX_LOCAL_UTC_OFFSET_MINUTES=180
+```
+
+With these defaults, `11.06.2026 00:05:00` is parsed as Moscow time and stored
+in SQLite as UTC `2026-06-10T21:05:00.000Z`. The worker publishes when current
+UTC time reaches that stored value.
+
+If an active social payload has no activity-start field, has only a date, or has
+an invalid date value, the service stores `failed`, does not call Telegram, and
+notifies the admin when `TELEGRAM_ADMIN_CHAT_ID` is configured.
+
+The server logs non-empty scheduler runs as `Scheduled publishing worker result`
+with `{ checked, published, failed }`, so `journalctl -u bitrix-tg -f` shows
+whether the queue actually picked up due posts.

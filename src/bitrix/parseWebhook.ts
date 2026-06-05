@@ -39,6 +39,7 @@ export class BitrixWebhookParseError extends Error {
 
 export interface ParseBitrixWebhookOptions {
   activeFromField?: string;
+  activeFromUtcOffsetMinutes?: number;
 }
 
 export function parseBitrixWebhook(
@@ -104,7 +105,7 @@ function parseEnvelope(
     "fields.PREVIEW_PICTURE",
     "fields.DETAIL_PICTURE"
   ]);
-  const scheduledAt = parseScheduledAt(body, options.activeFromField);
+  const scheduledAt = parseScheduledAt(body, options);
   const activeRaw = toStringValue(readFirstValue(body, ["active", "ACTIVE"]))
     .trim()
     .toUpperCase();
@@ -374,7 +375,7 @@ function unresolvedPhotoId(id: string): NormalizedPhoto[] {
 
 function parseScheduledAt(
   body: Record<string, unknown>,
-  configuredField?: string
+  options: ParseBitrixWebhookOptions
 ): {
   date: Date | null;
   sourceField: string | null;
@@ -382,7 +383,7 @@ function parseScheduledAt(
   precision: ScheduledAtPrecision | null;
 } {
   const candidateFields = uniqueStrings([
-    configuredField,
+    options.activeFromField,
     "DATE_ACTIVE_FROM",
     "ACTIVE_FROM",
     "active_from",
@@ -403,7 +404,7 @@ function parseScheduledAt(
       continue;
     }
 
-    const parsed = parseDateValue(value);
+    const parsed = parseDateValue(value, options.activeFromUtcOffsetMinutes);
     if (parsed) {
       return {
         date: parsed.date,
@@ -412,6 +413,13 @@ function parseScheduledAt(
         precision: parsed.precision
       };
     }
+
+    return {
+      date: null,
+      sourceField: field,
+      rawValue: toStringValue(value),
+      precision: null
+    };
   }
 
   return {
@@ -422,7 +430,10 @@ function parseScheduledAt(
   };
 }
 
-function parseDateValue(value: unknown): {
+function parseDateValue(
+  value: unknown,
+  utcOffsetMinutes?: number
+): {
   date: Date;
   precision: ScheduledAtPrecision;
 } | null {
@@ -438,9 +449,19 @@ function parseDateValue(value: unknown): {
     return null;
   }
 
-  const bitrixDate = parseBitrixDate(text);
+  const bitrixDate = parseBitrixDate(text, utcOffsetMinutes);
   if (bitrixDate) {
     return bitrixDate;
+  }
+
+  if (utcOffsetMinutes !== undefined && !hasExplicitTimezone(text)) {
+    const localIsoDate = parseIsoLikeLocalDate(text);
+    if (localIsoDate) {
+      return {
+        date: localPartsToDate(localIsoDate, utcOffsetMinutes),
+        precision: hasExplicitTime(text) ? "datetime" : "date"
+      };
+    }
   }
 
   const precision = hasExplicitTime(text) ? "datetime" : "date";
@@ -452,7 +473,19 @@ function parseDateValue(value: unknown): {
   return Number.isNaN(date.getTime()) ? null : { date, precision };
 }
 
-function parseBitrixDate(text: string): {
+interface LocalDateParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+function parseBitrixDate(
+  text: string,
+  utcOffsetMinutes?: number
+): {
   date: Date;
   precision: ScheduledAtPrecision;
 } | null {
@@ -470,15 +503,20 @@ function parseBitrixDate(text: string): {
   const hour = Number(hourText ?? 0);
   const minute = Number(minuteText ?? 0);
   const second = Number(secondText ?? 0);
-  const date = new Date(year, month - 1, day, hour, minute, second);
+  const parts = { year, month, day, hour, minute, second };
+  const date =
+    utcOffsetMinutes === undefined
+      ? new Date(year, month - 1, day, hour, minute, second)
+      : localPartsToDate(parts, utcOffsetMinutes);
+  const validationDate = new Date(year, month - 1, day, hour, minute, second);
 
   if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day ||
-    date.getHours() !== hour ||
-    date.getMinutes() !== minute ||
-    date.getSeconds() !== second
+    validationDate.getFullYear() !== year ||
+    validationDate.getMonth() !== month - 1 ||
+    validationDate.getDate() !== day ||
+    validationDate.getHours() !== hour ||
+    validationDate.getMinutes() !== minute ||
+    validationDate.getSeconds() !== second
   ) {
     return null;
   }
@@ -487,6 +525,68 @@ function parseBitrixDate(text: string): {
     date,
     precision: hourText && minuteText ? "datetime" : "date"
   };
+}
+
+function parseIsoLikeLocalDate(text: string): LocalDateParts | null {
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (!match) {
+    return null;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
+    match;
+  const parts = {
+    year: Number(yearText),
+    month: Number(monthText),
+    day: Number(dayText),
+    hour: Number(hourText ?? 0),
+    minute: Number(minuteText ?? 0),
+    second: Number(secondText ?? 0)
+  };
+  const validationDate = new Date(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+
+  if (
+    validationDate.getFullYear() !== parts.year ||
+    validationDate.getMonth() !== parts.month - 1 ||
+    validationDate.getDate() !== parts.day ||
+    validationDate.getHours() !== parts.hour ||
+    validationDate.getMinutes() !== parts.minute ||
+    validationDate.getSeconds() !== parts.second
+  ) {
+    return null;
+  }
+
+  return parts;
+}
+
+function localPartsToDate(
+  parts: LocalDateParts,
+  utcOffsetMinutes: number
+): Date {
+  return new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    ) -
+      utcOffsetMinutes * 60 * 1000
+  );
+}
+
+function hasExplicitTimezone(text: string): boolean {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
 }
 
 function hasExplicitTime(text: string): boolean {

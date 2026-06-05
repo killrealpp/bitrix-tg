@@ -54,6 +54,7 @@ export interface ProcessBitrixEventDeps {
   mediaSyncPolicy?: MediaSyncPolicy;
   adminNotifier?: MissingScheduleTimeAdminNotifier;
   photoResolver?: BitrixPhotoResolver;
+  requireExactScheduleTime?: boolean;
 }
 
 export interface MissingScheduleTimeAdminNotifier {
@@ -96,7 +97,10 @@ export async function processBitrixEvent(
     );
   }
 
-  const missingExactTimeError = getMissingExactTimeError(event);
+  const missingExactTimeError = getMissingExactTimeError(
+    event,
+    deps.requireExactScheduleTime ?? false
+  );
   if (missingExactTimeError) {
     return failMissingExactTime(
       event,
@@ -216,12 +220,17 @@ async function failMissingExactTime(
   };
 }
 
-function getMissingExactTimeError(event: ParsedBitrixEvent): string | null {
-  if (
-    !event.scheduledAtSourceField ||
-    event.scheduledAtPrecision === null ||
-    event.scheduledAtPrecision === "datetime"
-  ) {
+function getMissingExactTimeError(
+  event: ParsedBitrixEvent,
+  requireExactScheduleTime: boolean
+): string | null {
+  if (!event.scheduledAtSourceField) {
+    return requireExactScheduleTime
+      ? "Missing exact publication time. Set active_from with HH:MM:SS before publishing."
+      : null;
+  }
+
+  if (event.scheduledAtPrecision === "datetime") {
     return null;
   }
 

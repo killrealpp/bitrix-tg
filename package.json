@@ -9,6 +9,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/src/server.js",
     "test": "vitest run",
+    "test:telegram-photo": "node scripts/local-telegram-photo-e2e.js",
     "test:watch": "vitest"
   },
   "keywords": [],

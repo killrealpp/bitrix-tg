@@ -19,6 +19,23 @@ describe("loadConfig", () => {
     );
   });
 
+  it("defaults exact Bitrix time validation to Moscow local time", () => {
+    const config = loadConfig({});
+
+    expect(config.bitrixRequireExactActiveFrom).toBe(true);
+    expect(config.bitrixLocalUtcOffsetMinutes).toBe(180);
+  });
+
+  it("loads exact Bitrix time validation settings from env", () => {
+    const config = loadConfig({
+      BITRIX_REQUIRE_EXACT_ACTIVE_FROM: "false",
+      BITRIX_LOCAL_UTC_OFFSET_MINUTES: "240"
+    });
+
+    expect(config.bitrixRequireExactActiveFrom).toBe(false);
+    expect(config.bitrixLocalUtcOffsetMinutes).toBe(240);
+  });
+
   it("loads Telegram retry settings from env", () => {
     const config = loadConfig({
       TELEGRAM_RETRY_ATTEMPTS: "5",
@@ -88,6 +105,8 @@ describe("loadConfig", () => {
     expect(example).toContain("TELEGRAM_ADMIN_CHAT_ID=609150103");
     expect(example).toContain("SQLITE_DB_PATH=./data/bitrix-tg.sqlite");
     expect(example).toContain("BITRIX_FILE_RESOLVER_URL=");
+    expect(example).toContain("BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true");
+    expect(example).toContain("BITRIX_LOCAL_UTC_OFFSET_MINUTES=180");
     expect(example).toContain("TELEGRAM_PHOTO_DELIVERY_MODE=upload");
     expect(example).toContain("TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS=15000");
   });

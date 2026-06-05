@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LOG_REDACT_PATHS, buildApp } from "../src/server";
+import { runDuePosts } from "../src/scheduler/runDuePosts";
 import {
   FakeBitrixPhotoResolver,
   FakeDbGateway,
@@ -149,6 +150,158 @@ describe("server", () => {
       "2999-01-01T00:00:00.000Z"
     );
     expect(telegram.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it("requires active_from through the webhook route when configured", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const app = buildApp({
+      db,
+      telegram,
+      config: {
+        bitrixRequireExactActiveFrom: true
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/bitrix",
+      payload: [
+        {
+          body: {
+            element_id: 14,
+            active: "Y",
+            pub_news_social: "2976",
+            name: "Missing time"
+          }
+        }
+      ]
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      processed: 1,
+      failed: 1
+    });
+    expect(telegram.calls).toHaveLength(0);
+    expect(db.posts[0]).toMatchObject({
+      bitrixId: 14,
+      status: "failed"
+    });
+    await app.close();
+  });
+
+  it("applies the configured Bitrix local UTC offset in the webhook route", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const app = buildApp({
+      db,
+      telegram,
+      config: {
+        bitrixLocalUtcOffsetMinutes: 180
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/bitrix",
+      payload: [
+        {
+          body: {
+            element_id: 15,
+            active: "Y",
+            pub_news_social: "2976",
+            name: "Scheduled local time",
+            active_from: "04.06.2999 13:00:00"
+          }
+        }
+      ]
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      processed: 1,
+      scheduled: 1
+    });
+    expect(db.posts[0].scheduledAt?.toISOString()).toBe(
+      "2999-06-04T10:00:00.000Z"
+    );
+    expect(telegram.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it("stores production photo arrays through the webhook route and publishes them when due", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const app = buildApp({
+      db,
+      telegram,
+      config: {
+        bitrixRequireExactActiveFrom: true,
+        bitrixLocalUtcOffsetMinutes: 180
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/bitrix",
+      payload: [
+        {
+          body: {
+            action: "update",
+            element_id: 16,
+            active: "Y",
+            pub_news_social: "2976",
+            name: "Scheduled production album",
+            detail_text: "Album body",
+            active_from: "04.06.2999 13:00:00",
+            all_properties: {
+              PHOTOS: [
+                {
+                  id: "253901",
+                  url: "https://example.com/upload/image.png",
+                  path: "/upload/image.png"
+                },
+                {
+                  id: "253902",
+                  url: "https://example.com/upload/2026-01-15 19.47.41.jpg",
+                  path: "/upload/2026-01-15 19.47.41.jpg"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      processed: 1,
+      scheduled: 1
+    });
+    expect(telegram.calls).toHaveLength(0);
+    expect(db.posts[0].photos).toHaveLength(2);
+    expect(db.posts[0].scheduledAt?.toISOString()).toBe(
+      "2999-06-04T10:00:00.000Z"
+    );
+
+    const due = await runDuePosts({
+      db,
+      telegram,
+      now: new Date("2999-06-04T10:00:00.000Z")
+    });
+
+    expect(due).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/upload/image.png",
+      "https://example.com/upload/2026-01-15 19.47.41.jpg"
+    ]);
     await app.close();
   });
 

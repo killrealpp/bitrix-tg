@@ -193,6 +193,48 @@ describe("processBitrixEvent", () => {
     ]);
   });
 
+  it("fails active social posts without active_from when exact time is required", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const adminNotifier = new FakeMissingScheduleTimeAdminNotifier();
+    const now = new Date("2026-06-05T06:12:00.000Z");
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 24,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "No time"
+      }
+    });
+
+    const result = await processBitrixEvent(event, {
+      db,
+      telegram,
+      adminNotifier,
+      now,
+      requireExactScheduleTime: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe(
+      "Missing exact publication time. Set active_from with HH:MM:SS before publishing."
+    );
+    expect(telegram.calls).toHaveLength(0);
+    expect(db.posts[0]).toMatchObject({
+      status: "failed",
+      lastError: result.error,
+      adminNotifiedAt: now
+    });
+    expect(adminNotifier.calls).toEqual([
+      {
+        bitrixId: 24,
+        sourceField: null,
+        rawValue: null,
+        error: result.error
+      }
+    ]);
+  });
+
   it("does nothing for an identical repeated webhook", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
@@ -210,6 +252,29 @@ describe("processBitrixEvent", () => {
 
     expect(second.status).toBe("unchanged");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
+  });
+
+  it("does nothing for an identical repeated album webhook", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 29,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Same album",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+
+    await processBitrixEvent(event, { db, telegram });
+    const second = await processBitrixEvent(event, { db, telegram });
+
+    expect(second.status).toBe("unchanged");
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(db.messages).toHaveLength(2);
   });
 
   it("edits an existing text post when text changes", async () => {
@@ -519,6 +584,45 @@ describe("processBitrixEvent", () => {
     expect(db.messages.map((message) => message.role)).toEqual(["text", "extra_photo"]);
   });
 
+  it("adds multiple photos as an extra media group when an existing text post receives an album", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 30,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Text first"
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 30,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Text first",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendText",
+      "sendMediaGroup"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("mixed");
+    expect(db.messages.map((message) => message.role)).toEqual([
+      "text",
+      "extra_photo",
+      "extra_photo"
+    ]);
+  });
+
   it("edits a photo caption when only media post text changes", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
@@ -562,6 +666,44 @@ describe("processBitrixEvent", () => {
       "editCaption"
     ]);
     expect(db.posts[0].telegramText).toBe("Updated caption");
+  });
+
+  it("edits an album caption when only album text changes", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 31,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Original album caption",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 31,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Updated album caption",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendMediaGroup",
+      "editCaption"
+    ]);
+    expect(db.posts[0].telegramText).toBe("Updated album caption");
+    expect(db.messages).toHaveLength(2);
   });
 
   it("soft-edits a changed single photo through editMedia", async () => {
@@ -608,6 +750,53 @@ describe("processBitrixEvent", () => {
     ]);
     expect(db.messages.map((message) => message.mediaUrl)).toEqual([
       "https://example.com/new.jpg"
+    ]);
+  });
+
+  it("rebuild policy replaces a single-photo post with a media group when photos are added", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 32,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Photo grows",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/a.jpg"
+          }
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 32,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Photo grows",
+        all_properties: {
+          PHOTOS: [
+            { url: "https://example.com/a.jpg" },
+            { url: "https://example.com/b.jpg" }
+          ]
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendPhoto",
+      "deleteMessage",
+      "sendMediaGroup"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/a.jpg",
+      "https://example.com/b.jpg"
     ]);
   });
 
@@ -714,6 +903,92 @@ describe("processBitrixEvent", () => {
       "https://example.com/b.jpg",
       "https://example.com/c.jpg"
     ]);
+  });
+
+  it("rebuild policy replaces an album with a single-photo post when photos shrink to one", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 33,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Album shrinks",
+        all_properties: {
+          PHOTOS: [
+            { url: "https://example.com/a.jpg" },
+            { url: "https://example.com/b.jpg" }
+          ]
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 33,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Album shrinks",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/a.jpg"
+          }
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendMediaGroup",
+      "deleteMessage",
+      "deleteMessage",
+      "sendPhoto"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("photo");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/a.jpg"
+    ]);
+  });
+
+  it("rebuild policy replaces a single-photo post with text when the photo is removed", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 34,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Photo becomes text",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/a.jpg"
+          }
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 34,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Photo becomes text"
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendPhoto",
+      "deleteMessage",
+      "sendText"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("text");
+    expect(db.posts[0].photos).toEqual([]);
+    expect(db.messages.map((message) => message.role)).toEqual(["text"]);
   });
 
   it("rebuild policy deletes old media and republishes text when Bitrix removes all photos", async () => {
@@ -843,6 +1118,47 @@ describe("processBitrixEvent", () => {
       }
     ]);
     expect(db.posts[0].lastError).toBe(result.error);
+  });
+
+  it("publishes a previously failed unresolved-photo post when a later payload includes the URL", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 35,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Later fixed photo",
+        all_properties: {
+          PHOTOS: "253902"
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 35,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Later fixed photo",
+        all_properties: {
+          PHOTOS: {
+            id: "253902",
+            url: "https://example.com/fixed.jpg",
+            path: "/upload/fixed.jpg"
+          }
+        }
+      }
+    });
+
+    const failed = await processBitrixEvent(first, { db, telegram });
+    const fixed = await processBitrixEvent(second, { db, telegram });
+
+    expect(failed.status).toBe("failed");
+    expect(fixed.status).toBe("published");
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
+    expect(db.posts[0].status).toBe("published");
+    expect(db.posts[0].publicationKind).toBe("photo");
+    expect(db.posts[0].lastError).toBeNull();
   });
 
   it("edits the original text message for mixed text-plus-photo posts", async () => {

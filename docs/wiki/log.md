@@ -91,3 +91,18 @@ JSON-string photo arrays, comma-separated file ids, and
 `unresolvedPhotoCount`, so production logs show whether photos were recognized
 before publishing. Verification: `npm test` passed 90 tests in 10 files and
 `npm run build` passed.
+
+## [2026-06-05 14:25+03:00] milestone | Scheduled photo E2E and Bitrix local time
+
+Scheduling now treats Bitrix date strings without explicit timezone as Bitrix
+local time via `BITRIX_LOCAL_UTC_OFFSET_MINUTES=180`, instead of depending on
+the VPS process timezone. Production exact-time enforcement is wired through the
+webhook route with `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true`: missing, date-only,
+or invalid activity time fails active social posts before Telegram and can
+notify the admin.
+
+The scheduler now logs non-empty worker results. Verification: `npm test`
+passed 97 tests in 10 files, `npm run build` passed, and a real local Telegram
+E2E passed with two local URL photos containing spaces: scheduled store,
+upload-first `sendMediaGroup`, album caption edit, photo-removal rebuild to
+text, and inactive cleanup deletion all succeeded without printing secrets.

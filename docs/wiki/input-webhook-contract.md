@@ -117,3 +117,20 @@ array. If a raw file id arrives and no resolver is configured, or the resolver
 fails/returns no URL, the active social post is marked `failed`, Telegram is not
 called, and the admin notifier is called through `TELEGRAM_ADMIN_CHAT_ID` when
 configured.
+
+## 2026-06-05 / Release Activity Time Contract
+
+The preferred production time field is `body.active_from` with an exact value
+like:
+
+```json
+{ "active_from": "11.06.2026 00:05:00" }
+```
+
+The service also keeps the existing aliases (`ACTIVE_FROM`, `DATE_ACTIVE_FROM`,
+`fields.*`, `all_properties.*`, and `BITRIX_ACTIVE_FROM_FIELD`) for compatibility.
+
+When the incoming value has no explicit timezone, it is interpreted using
+`BITRIX_LOCAL_UTC_OFFSET_MINUTES`, default `180` for Moscow time. Date-only,
+missing, or invalid active time values fail active social posts before Telegram
+publication when `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true`.
