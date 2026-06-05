@@ -79,3 +79,15 @@ behavior with multipart fallback, and `url` keeps URL-only behavior for
 debugging. Webhook processing now logs each failed `bitrixId` with a redacted
 error so photo failures are visible in `journalctl`. Verification: `npm test`
 passed 82 tests in 10 files and `npm run build` passed.
+
+## [2026-06-05 13:50+03:00] milestone | Broad Bitrix photo parsing
+
+Photo detection was broadened before Telegram delivery. The parser now accepts
+lowercase and uppercase photo fields (`url`/`URL`, `src`/`SRC`, `id`/`ID`,
+`FILE_ID`), Bitrix property wrappers such as `VALUE`, numeric object maps,
+JSON-string photo arrays, comma-separated file ids, and
+`preview_picture`/`detail_picture` fallback fields. The webhook route logs
+`Bitrix event parsed` with `photoCount`, `photoIds`, and
+`unresolvedPhotoCount`, so production logs show whether photos were recognized
+before publishing. Verification: `npm test` passed 90 tests in 10 files and
+`npm run build` passed.

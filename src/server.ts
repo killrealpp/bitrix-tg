@@ -98,6 +98,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
         activeFromField: deps.config.bitrixActiveFromField
       });
       const results: ProcessResult[] = [];
+      logParsedEvents(app, events);
 
       for (const event of events) {
         results.push(
@@ -137,6 +138,32 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
   });
 
   return app;
+}
+
+function logParsedEvents(
+  app: FastifyInstance,
+  events: Array<{
+    bitrixId: number;
+    photos: Array<{
+      id?: string;
+      unresolved?: boolean;
+    }>;
+  }>
+): void {
+  for (const event of events) {
+    app.log.info(
+      {
+        bitrixId: event.bitrixId,
+        photoCount: event.photos.length,
+        photoIds: event.photos
+          .map((photo) => photo.id)
+          .filter((id): id is string => Boolean(id)),
+        unresolvedPhotoCount: event.photos.filter((photo) => photo.unresolved)
+          .length
+      },
+      "Bitrix event parsed"
+    );
+  }
 }
 
 function logFailedProcessingResults(

@@ -76,16 +76,34 @@ function parseEnvelope(
       "all_properties.PUB_NEWS_SOCIAL"
     ]) ?? allProperties.pub_news_social
   );
-  const photos = normalizePhotos(
-    readFirstValue(body, [
-      "all_properties.PHOTOS",
-      "all_properties.photos",
-      "properties.PHOTOS",
-      "properties.photos",
-      "PHOTOS",
-      "photos"
-    ])
-  );
+  const photos = readFirstPhotos(body, [
+    "all_properties.PHOTOS",
+    "all_properties.photos",
+    "all_properties.PHOTO",
+    "all_properties.photo",
+    "all_properties.MORE_PHOTO",
+    "all_properties.more_photo",
+    "properties.PHOTOS",
+    "properties.photos",
+    "properties.PHOTO",
+    "properties.photo",
+    "properties.MORE_PHOTO",
+    "properties.more_photo",
+    "fields.PHOTOS",
+    "fields.photos",
+    "fields.PHOTO",
+    "fields.photo",
+    "PHOTOS",
+    "photos",
+    "PHOTO",
+    "photo",
+    "preview_picture",
+    "PREVIEW_PICTURE",
+    "detail_picture",
+    "DETAIL_PICTURE",
+    "fields.PREVIEW_PICTURE",
+    "fields.DETAIL_PICTURE"
+  ]);
   const scheduledAt = parseScheduledAt(body, options.activeFromField);
   const activeRaw = toStringValue(readFirstValue(body, ["active", "ACTIVE"]))
     .trim()
@@ -194,51 +212,164 @@ function normalizePhotos(value: unknown): NormalizedPhoto[] {
     return [];
   }
 
-  const rawPhotos = Array.isArray(value) ? value : [value];
+  return normalizePhotoValue(value);
+}
 
-  return rawPhotos.flatMap((photo): NormalizedPhoto[] => {
-    if (typeof photo === "string" || typeof photo === "number") {
-      const id = toStringValue(photo).trim();
-      return id
-        ? [
-            {
-              id,
-              unresolved: true,
-              unresolvedReason: "bitrix_file_id_without_url"
-            }
-          ]
-        : [];
+function normalizePhotoValue(value: unknown): NormalizedPhoto[] {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(normalizePhotoValue);
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    const parsedJson = parseMaybeJsonPhotoValue(text);
+    if (parsedJson !== undefined) {
+      return normalizePhotoValue(parsedJson);
     }
 
-    if (!isRecord(photo)) {
-      return [];
+    if (isCommaSeparatedPhotoList(text)) {
+      return text
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .flatMap(normalizePhotoValue);
     }
 
-    const url = toStringValue(photo.url).trim();
-    if (url) {
-      return [
+    if (isHttpUrl(text)) {
+      return [{ url: text }];
+    }
+
+    return unresolvedPhotoId(text);
+  }
+
+  if (typeof value === "number") {
+    return unresolvedPhotoId(String(value));
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const direct = normalizePhotoRecord(value);
+  if (direct.length > 0) {
+    return direct;
+  }
+
+  const nested = normalizeNestedPhotoFields(value);
+  if (nested.length > 0) {
+    return nested;
+  }
+
+  if (isCollectionRecord(value) || isPhotoValueCollection(value)) {
+    return Object.values(value).flatMap(normalizePhotoValue);
+  }
+
+  return [];
+}
+
+function normalizePhotoRecord(record: Record<string, unknown>): NormalizedPhoto[] {
+  const url = readOptionalString(record, [
+    "url",
+    "URL",
+    "src",
+    "SRC",
+    "download_url",
+    "DOWNLOAD_URL",
+    "downloadUrl",
+    "file_url",
+    "FILE_URL",
+    "fileUrl"
+  ]);
+  const id = readOptionalScalarString(record, [
+    "id",
+    "ID",
+    "file_id",
+    "FILE_ID",
+    "fileId",
+    "VALUE",
+    "value"
+  ]);
+  const path = readOptionalString(record, [
+    "path",
+    "PATH",
+    "file_path",
+    "FILE_PATH",
+    "filePath"
+  ]);
+
+  if (url) {
+    return [
+      {
+        id,
+        url,
+        path
+      }
+    ];
+  }
+
+  if (id) {
+    return [
+      {
+        id,
+        path,
+        unresolved: true,
+        unresolvedReason: "bitrix_file_id_without_url"
+      }
+    ];
+  }
+
+  return [];
+}
+
+function normalizeNestedPhotoFields(record: Record<string, unknown>): NormalizedPhoto[] {
+  const nestedFields = [
+    "VALUE",
+    "value",
+    "VALUES",
+    "values",
+    "FILE",
+    "file",
+    "PHOTO",
+    "photo",
+    "PHOTOS",
+    "photos",
+    "ITEMS",
+    "items"
+  ];
+
+  for (const field of nestedFields) {
+    if (!Object.prototype.hasOwnProperty.call(record, field)) {
+      continue;
+    }
+
+    const photos = normalizePhotoValue(record[field]);
+    if (photos.length > 0) {
+      return photos;
+    }
+  }
+
+  return [];
+}
+
+function unresolvedPhotoId(id: string): NormalizedPhoto[] {
+  const trimmed = id.trim();
+  return trimmed
+    ? [
         {
-          id: optionalString(photo.id),
-          url,
-          path: optionalString(photo.path)
-        }
-      ];
-    }
-
-    const id = optionalString(photo.id);
-    if (id) {
-      return [
-        {
-          id,
-          path: optionalString(photo.path),
+          id: trimmed,
           unresolved: true,
           unresolvedReason: "bitrix_file_id_without_url"
         }
-      ];
-    }
-
-    return [];
-  });
+      ]
+    : [];
 }
 
 function parseScheduledAt(
@@ -387,6 +518,21 @@ function optionalString(value: unknown): string | undefined {
   return text.length > 0 ? text : undefined;
 }
 
+function readFirstPhotos(
+  body: Record<string, unknown>,
+  paths: string[]
+): NormalizedPhoto[] {
+  for (const path of paths) {
+    const value = readByPath(body, path);
+    const photos = normalizePhotos(value);
+    if (photos.length > 0) {
+      return photos;
+    }
+  }
+
+  return [];
+}
+
 function readFirstValue(
   body: Record<string, unknown>,
   paths: string[]
@@ -430,6 +576,113 @@ function readByPath(
   }
 
   return current;
+}
+
+function readOptionalString(
+  record: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    const text = toStringValue(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function readOptionalScalarString(
+  record: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === null || value === undefined || isRecord(value) || Array.isArray(value)) {
+      continue;
+    }
+
+    const text = toStringValue(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function parseMaybeJsonPhotoValue(text: string): unknown | undefined {
+  if (!text.startsWith("[") && !text.startsWith("{")) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function isCommaSeparatedPhotoList(text: string): boolean {
+  return (
+    text.includes(",") &&
+    text
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .every((entry) => /^\d+$/.test(entry) || isHttpUrl(entry))
+  );
+}
+
+function isHttpUrl(text: string): boolean {
+  return /^https?:\/\//i.test(text);
+}
+
+function isCollectionRecord(record: Record<string, unknown>): boolean {
+  const keys = Object.keys(record);
+  return (
+    keys.length > 0 &&
+    keys.every((key) => /^\d+$/.test(key) || /^n\d+$/i.test(key))
+  );
+}
+
+function isPhotoValueCollection(record: Record<string, unknown>): boolean {
+  const values = Object.values(record);
+  return values.length > 0 && values.every(isLikelyPhotoValue);
+}
+
+function isLikelyPhotoValue(value: unknown): boolean {
+  if (typeof value === "string" || typeof value === "number") {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return true;
+  }
+
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return [
+    "url",
+    "URL",
+    "src",
+    "SRC",
+    "id",
+    "ID",
+    "file_id",
+    "FILE_ID",
+    "VALUE",
+    "value",
+    "path",
+    "PATH"
+  ].some((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
 function uniqueStrings(values: string[]): string[] {

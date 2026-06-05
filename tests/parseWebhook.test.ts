@@ -82,6 +82,185 @@ describe("parseBitrixWebhook", () => {
     ]);
   });
 
+  it("normalizes Bitrix/PHP uppercase photo objects with SRC fields", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        action: "update",
+        element_id: "181697",
+        active: "Y",
+        pub_news_social: "2976",
+        all_properties: {
+          PHOTOS: [
+            {
+              ID: "253901",
+              SRC: "https://example.com/upload/photo one.jpg",
+              PATH: "/upload/photo one.jpg"
+            },
+            {
+              FILE_ID: "253902",
+              URL: "https://example.com/upload/photo two.jpg",
+              PATH: "/upload/photo two.jpg"
+            }
+          ]
+        }
+      }
+    });
+
+    expect(event.photos).toEqual([
+      {
+        id: "253901",
+        url: "https://example.com/upload/photo one.jpg",
+        path: "/upload/photo one.jpg"
+      },
+      {
+        id: "253902",
+        url: "https://example.com/upload/photo two.jpg",
+        path: "/upload/photo two.jpg"
+      }
+    ]);
+  });
+
+  it("normalizes Bitrix property wrappers with VALUE photos", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        action: "update",
+        element_id: "181698",
+        active: "Y",
+        pub_news_social: "2976",
+        all_properties: {
+          PHOTOS: {
+            VALUE: [
+              {
+                ID: "253901",
+                SRC: "https://example.com/upload/a.jpg"
+              },
+              {
+                ID: "253902",
+                SRC: "https://example.com/upload/b.jpg"
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(event.photos).toEqual([
+      {
+        id: "253901",
+        url: "https://example.com/upload/a.jpg",
+        path: undefined
+      },
+      {
+        id: "253902",
+        url: "https://example.com/upload/b.jpg",
+        path: undefined
+      }
+    ]);
+  });
+
+  it("normalizes Bitrix object maps with numeric property keys", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        action: "update",
+        element_id: "181699",
+        active: "Y",
+        pub_news_social: "2976",
+        all_properties: {
+          PHOTOS: {
+            "0": {
+              id: "253901",
+              url: "https://example.com/upload/a.jpg"
+            },
+            "1": {
+              id: "253902",
+              url: "https://example.com/upload/b.jpg"
+            }
+          }
+        }
+      }
+    });
+
+    expect(event.photos).toEqual([
+      {
+        id: "253901",
+        url: "https://example.com/upload/a.jpg",
+        path: undefined
+      },
+      {
+        id: "253902",
+        url: "https://example.com/upload/b.jpg",
+        path: undefined
+      }
+    ]);
+  });
+
+  it("uses preview/detail picture fallback when PHOTOS is absent", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        action: "update",
+        element_id: "181700",
+        active: "Y",
+        pub_news_social: "2976",
+        preview_picture: {
+          ID: "253901",
+          SRC: "https://example.com/upload/preview.jpg"
+        }
+      }
+    });
+
+    expect(event.photos).toEqual([
+      {
+        id: "253901",
+        url: "https://example.com/upload/preview.jpg",
+        path: undefined
+      }
+    ]);
+  });
+
+  it("normalizes JSON-string and comma-separated photo id payloads", () => {
+    const [jsonEvent] = parseBitrixWebhook({
+      body: {
+        element_id: 181701,
+        active: "Y",
+        pub_news_social: "2976",
+        all_properties: {
+          PHOTOS:
+            '[{"id":"253901","url":"https://example.com/upload/a.jpg"}]'
+        }
+      }
+    });
+    const [idEvent] = parseBitrixWebhook({
+      body: {
+        element_id: 181702,
+        active: "Y",
+        pub_news_social: "2976",
+        all_properties: {
+          PHOTOS: "253901,253902"
+        }
+      }
+    });
+
+    expect(jsonEvent.photos).toEqual([
+      {
+        id: "253901",
+        url: "https://example.com/upload/a.jpg",
+        path: undefined
+      }
+    ]);
+    expect(idEvent.photos).toEqual([
+      {
+        id: "253901",
+        unresolved: true,
+        unresolvedReason: "bitrix_file_id_without_url"
+      },
+      {
+        id: "253902",
+        unresolved: true,
+        unresolvedReason: "bitrix_file_id_without_url"
+      }
+    ]);
+  });
+
   it("falls back to all_properties.pub_news_social and removes empty photos", () => {
     const [event] = parseBitrixWebhook({
       body: {
