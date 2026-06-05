@@ -70,6 +70,7 @@ export interface TelegramBotApiClientOptions {
   messageThreadId?: number;
   parseMode?: "HTML" | "MarkdownV2";
   apiBaseUrl?: string;
+  photoDownloadTimeoutMs?: number;
   retryAttempts?: number;
   retryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -96,12 +97,17 @@ interface TelegramApiMessage {
 
 export class TelegramBotApiClient implements TelegramClient {
   private readonly apiBaseUrl: string;
+  private readonly photoDownloadTimeoutMs: number;
   private readonly retryAttempts: number;
   private readonly retryDelayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: TelegramBotApiClientOptions) {
     this.apiBaseUrl = options.apiBaseUrl ?? "https://api.telegram.org";
+    this.photoDownloadTimeoutMs = Math.max(
+      1,
+      options.photoDownloadTimeoutMs ?? 15_000
+    );
     this.retryAttempts = Math.max(1, options.retryAttempts ?? 3);
     this.retryDelayMs = Math.max(0, options.retryDelayMs ?? 500);
     this.sleep = options.sleep ?? sleep;
@@ -131,29 +137,47 @@ export class TelegramBotApiClient implements TelegramClient {
 
   async sendPhoto(input: SendPhotoInput): Promise<TelegramMessageRef> {
     const photoUrl = requireResolvedPhotoUrl(input.photo);
-    const result = await this.call<TelegramApiMessage>("sendPhoto", {
-      chat_id: this.options.chatId,
-      message_thread_id: this.options.messageThreadId,
-      photo: encodePhotoUrl(photoUrl),
-      caption: input.caption,
-      parse_mode: this.options.parseMode
-    });
+    let result: TelegramApiMessage;
+    try {
+      result = await this.call<TelegramApiMessage>("sendPhoto", {
+        chat_id: this.options.chatId,
+        message_thread_id: this.options.messageThreadId,
+        photo: encodePhotoUrl(photoUrl),
+        caption: input.caption,
+        parse_mode: this.options.parseMode
+      });
+    } catch (error) {
+      if (!shouldUploadPhotoFallback(error)) {
+        throw error;
+      }
+
+      result = await this.sendPhotoAsUpload(input, photoUrl, error);
+    }
 
     return toMessageRef(result, input.role ?? "photo", 0, photoUrl);
   }
 
   async sendMediaGroup(input: SendMediaGroupInput): Promise<TelegramMessageRef[]> {
     const photoUrls = input.photos.map(requireResolvedPhotoUrl);
-    const result = await this.call<TelegramApiMessage[]>("sendMediaGroup", {
-      chat_id: this.options.chatId,
-      message_thread_id: this.options.messageThreadId,
-      media: photoUrls.map((photoUrl, index) => ({
-        type: "photo",
-        media: encodePhotoUrl(photoUrl),
-        caption: index === 0 ? input.caption : undefined,
-        parse_mode: index === 0 ? this.options.parseMode : undefined
-      }))
-    });
+    let result: TelegramApiMessage[];
+    try {
+      result = await this.call<TelegramApiMessage[]>("sendMediaGroup", {
+        chat_id: this.options.chatId,
+        message_thread_id: this.options.messageThreadId,
+        media: photoUrls.map((photoUrl, index) => ({
+          type: "photo",
+          media: encodePhotoUrl(photoUrl),
+          caption: index === 0 ? input.caption : undefined,
+          parse_mode: index === 0 ? this.options.parseMode : undefined
+        }))
+      });
+    } catch (error) {
+      if (!shouldUploadPhotoFallback(error)) {
+        throw error;
+      }
+
+      result = await this.sendMediaGroupAsUpload(input, photoUrls, error);
+    }
 
     return result.map((message, index) =>
       toMessageRef(message, input.role ?? "album_item", index, photoUrls[index])
@@ -173,16 +197,25 @@ export class TelegramBotApiClient implements TelegramClient {
 
   async editMedia(input: EditMediaInput): Promise<TelegramMessageRef> {
     const photoUrl = requireResolvedPhotoUrl(input.photo);
-    const result = await this.call<TelegramApiMessage>("editMessageMedia", {
-      chat_id: input.chatId,
-      message_id: input.messageId,
-      media: {
-        type: "photo",
-        media: encodePhotoUrl(photoUrl),
-        caption: input.caption,
-        parse_mode: input.caption ? this.options.parseMode : undefined
+    let result: TelegramApiMessage;
+    try {
+      result = await this.call<TelegramApiMessage>("editMessageMedia", {
+        chat_id: input.chatId,
+        message_id: input.messageId,
+        media: {
+          type: "photo",
+          media: encodePhotoUrl(photoUrl),
+          caption: input.caption,
+          parse_mode: input.caption ? this.options.parseMode : undefined
+        }
+      });
+    } catch (error) {
+      if (!shouldUploadPhotoFallback(error)) {
+        throw error;
       }
-    });
+
+      result = await this.editMediaAsUpload(input, photoUrl, error);
+    }
 
     return toMessageRef(
       result,
@@ -252,6 +285,184 @@ export class TelegramBotApiClient implements TelegramClient {
     return data.result;
   }
 
+  private async callMultipart<T>(
+    method: string,
+    formFactory: () => FormData
+  ): Promise<T> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= this.retryAttempts; attempt += 1) {
+      try {
+        return await this.callMultipartOnce<T>(method, formFactory());
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableTelegramError(error) || attempt === this.retryAttempts) {
+          throw error;
+        }
+
+        await this.sleep(getRetryDelayMs(error, this.retryDelayMs, attempt));
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async callMultipartOnce<T>(
+    method: string,
+    body: FormData
+  ): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.apiBaseUrl}/bot${this.options.botToken}/${method}`, {
+        method: "POST",
+        body
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new TelegramApiCallError(
+        `Telegram ${method} failed: ${this.redactMessage(message)}`,
+        true
+      );
+    }
+
+    return this.parseTelegramResponse<T>(method, response);
+  }
+
+  private async parseTelegramResponse<T>(
+    method: string,
+    response: Response
+  ): Promise<T> {
+    const data = (await response.json()) as TelegramApiResponse<T>;
+    if (!response.ok || !data.ok || data.result === undefined) {
+      const message = data.description ?? response.statusText;
+      throw new TelegramApiCallError(
+        `Telegram ${method} failed: ${this.redactMessage(message)}`,
+        isRetryableResponse(response.status),
+        data.parameters?.retry_after
+      );
+    }
+
+    return data.result;
+  }
+
+  private async sendPhotoAsUpload(
+    input: SendPhotoInput,
+    photoUrl: string,
+    directError: unknown
+  ): Promise<TelegramApiMessage> {
+    try {
+      const upload = await this.downloadPhotoUpload(photoUrl, "photo");
+      return await this.callMultipart<TelegramApiMessage>("sendPhoto", () =>
+        toMultipartForm(
+          {
+            chat_id: this.options.chatId,
+            message_thread_id: this.options.messageThreadId,
+            caption: input.caption,
+            parse_mode: this.options.parseMode
+          },
+          [upload]
+        )
+      );
+    } catch (fallbackError) {
+      throw withFallbackFailureContext(directError, fallbackError);
+    }
+  }
+
+  private async sendMediaGroupAsUpload(
+    input: SendMediaGroupInput,
+    photoUrls: string[],
+    directError: unknown
+  ): Promise<TelegramApiMessage[]> {
+    try {
+      const uploads = await Promise.all(
+        photoUrls.map((photoUrl, index) =>
+          this.downloadPhotoUpload(photoUrl, `photo_${index}`)
+        )
+      );
+
+      return await this.callMultipart<TelegramApiMessage[]>("sendMediaGroup", () =>
+        toMultipartForm(
+          {
+            chat_id: this.options.chatId,
+            message_thread_id: this.options.messageThreadId,
+            media: uploads.map((upload, index) => ({
+              type: "photo",
+              media: `attach://${upload.fieldName}`,
+              caption: index === 0 ? input.caption : undefined,
+              parse_mode: index === 0 ? this.options.parseMode : undefined
+            }))
+          },
+          uploads
+        )
+      );
+    } catch (fallbackError) {
+      throw withFallbackFailureContext(directError, fallbackError);
+    }
+  }
+
+  private async editMediaAsUpload(
+    input: EditMediaInput,
+    photoUrl: string,
+    directError: unknown
+  ): Promise<TelegramApiMessage> {
+    try {
+      const upload = await this.downloadPhotoUpload(photoUrl, "photo");
+      return await this.callMultipart<TelegramApiMessage>("editMessageMedia", () =>
+        toMultipartForm(
+          {
+            chat_id: input.chatId,
+            message_id: input.messageId,
+            media: {
+              type: "photo",
+              media: `attach://${upload.fieldName}`,
+              caption: input.caption,
+              parse_mode: input.caption ? this.options.parseMode : undefined
+            }
+          },
+          [upload]
+        )
+      );
+    } catch (fallbackError) {
+      throw withFallbackFailureContext(directError, fallbackError);
+    }
+  }
+
+  private async downloadPhotoUpload(
+    photoUrl: string,
+    fieldName: string
+  ): Promise<PhotoUpload> {
+    const encodedUrl = encodePhotoUrl(photoUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.photoDownloadTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(encodedUrl, {
+        signal: controller.signal
+      });
+    } catch (error) {
+      throw new Error(`Photo download failed: ${this.redactMessage(getErrorMessage(error))}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Photo download failed with HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength === 0) {
+      throw new Error("Photo download returned an empty file");
+    }
+
+    return {
+      fieldName,
+      blob: new Blob([bytes], { type: contentType }),
+      filename: getPhotoFilename(encodedUrl, contentType, fieldName)
+    };
+  }
+
   private redactMessage(message: string): string {
     return redactSensitiveText(message, [this.options.botToken]);
   }
@@ -288,6 +499,12 @@ function encodePhotoUrl(url: string): string {
   return encodeURI(url);
 }
 
+interface PhotoUpload {
+  fieldName: string;
+  blob: Blob;
+  filename: string;
+}
+
 function requireResolvedPhotoUrl(photo: NormalizedPhoto): string {
   if (!photo.url || photo.unresolved) {
     const idText = photo.id ? ` ${photo.id}` : "";
@@ -303,12 +520,111 @@ function stripUndefined(value: Record<string, unknown>): Record<string, unknown>
   );
 }
 
+function toMultipartForm(
+  fields: Record<string, unknown>,
+  uploads: PhotoUpload[]
+): FormData {
+  const form = new FormData();
+
+  for (const [key, value] of Object.entries(stripUndefined(fields))) {
+    form.append(
+      key,
+      typeof value === "string" || typeof value === "number"
+        ? String(value)
+        : JSON.stringify(value)
+    );
+  }
+
+  for (const upload of uploads) {
+    form.append(upload.fieldName, upload.blob, upload.filename);
+  }
+
+  return form;
+}
+
 function isRetryableResponse(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
 function isRetryableTelegramError(error: unknown): boolean {
   return error instanceof TelegramApiCallError && error.retryable;
+}
+
+function shouldUploadPhotoFallback(error: unknown): boolean {
+  if (!(error instanceof TelegramApiCallError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return [
+    "failed to get http url content",
+    "failed to get url content",
+    "wrong file identifier/http url specified",
+    "invalid file http url specified",
+    "wrong type of the web page content",
+    "url host is empty"
+  ].some((pattern) => message.includes(pattern));
+}
+
+function withFallbackFailureContext(
+  directError: unknown,
+  fallbackError: unknown
+): Error {
+  return new Error(
+    [
+      getErrorMessage(directError),
+      `Multipart photo fallback failed: ${getErrorMessage(fallbackError)}`
+    ].join(". ")
+  );
+}
+
+function getPhotoFilename(
+  encodedUrl: string,
+  contentType: string,
+  fallbackName: string
+): string {
+  let filename = fallbackName;
+  try {
+    const parsed = new URL(encodedUrl);
+    const lastSegment = parsed.pathname.split("/").filter(Boolean).at(-1);
+    if (lastSegment) {
+      filename = decodeURIComponent(lastSegment);
+    }
+  } catch {
+    filename = fallbackName;
+  }
+
+  const sanitized = sanitizeFilename(filename) || fallbackName;
+  if (/\.[a-z0-9]{2,5}$/i.test(sanitized)) {
+    return sanitized;
+  }
+
+  return `${sanitized}${extensionFromContentType(contentType)}`;
+}
+
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "_").trim();
+}
+
+function extensionFromContentType(contentType: string): string {
+  const type = contentType.split(";")[0]?.trim().toLowerCase();
+  switch (type) {
+    case "image/jpeg":
+    case "image/jpg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    default:
+      return ".jpg";
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function getRetryDelayMs(

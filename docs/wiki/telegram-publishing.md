@@ -82,3 +82,18 @@ If photo resolution still leaves any item without a URL, the publish/edit path
 stops before `sendPhoto`, `sendMediaGroup`, or `editMessageMedia`. The post is
 stored as `failed` and the admin notification path is used so the operator can
 fix the Bitrix resolver or the incoming payload mapping.
+
+## 2026-06-05 / Multipart Photo Upload Fallback
+
+For URL-bearing Bitrix photos, the Telegram client keeps the fast path first:
+`sendPhoto`, `sendMediaGroup`, and `editMessageMedia` receive the encoded HTTPS
+URL. If Telegram rejects that request with an HTTP URL content/media error, the
+service downloads the image itself from the encoded URL and retries the same
+Telegram method as multipart upload.
+
+For albums, the fallback downloads every photo and sends `sendMediaGroup` with
+`attach://photo_N` media references. For media replacement, the fallback sends
+`editMessageMedia` with a multipart `media` JSON object and one attached file.
+This improves production reliability for URLs with spaces or hosts that Telegram
+cannot fetch directly, as long as the `bitrix-tg` server itself can download the
+image and the file is valid for Telegram.

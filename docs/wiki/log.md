@@ -58,3 +58,14 @@ production payload с URL-bearing массивом `{ id, url, path }` resolver 
 publish/edit не вызывается, пост получает `failed`, и админ уведомляется через
 `TELEGRAM_ADMIN_CHAT_ID`, если notifier настроен. Scheduled worker использует тот
 же resolver для совместимости со старыми scheduled rows.
+## [2026-06-05 12:57+03:00] milestone | Telegram multipart photo fallback
+
+Telegram photo delivery is now more robust for production Bitrix URLs. The
+client still tries encoded HTTPS URLs first, but when Telegram rejects a photo
+URL with an HTTP URL content/media error, the service downloads the image itself
+and retries through multipart upload. This covers `sendPhoto`, `sendMediaGroup`,
+and `editMessageMedia`; media groups use `attach://photo_N` references. The
+fallback cannot fix missing URLs, unreachable image hosts from the `bitrix-tg`
+server, invalid image files, or Telegram file-size/type limits, but it removes
+Telegram-side URL fetching as a single point of failure. Verification:
+`npm test` passed 79 tests in 10 files and `npm run build` passed.
