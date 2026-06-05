@@ -36,6 +36,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-06-05 09:12+03:00) Tightened `active_from` scheduling safety: when Bitrix sends an activity-start field with only a date and no exact time, active/social posts are marked `failed`, no Telegram publication is attempted, and the admin notifier is called via the configured admin destination.
 - [x] (2026-06-05 09:40+03:00) Implemented the optional Bitrix photo resolver fallback: raw `PHOTOS` file ids call `BITRIX_FILE_RESOLVER_URL` when configured, URL-bearing arrays skip the resolver, unresolved results fail before Telegram and notify the admin, and the scheduled worker uses the same resolver for old scheduled rows.
 - [x] (2026-06-05 12:57+03:00) Hardened Telegram photo delivery: `sendPhoto`, `sendMediaGroup`, and `editMessageMedia` first try encoded HTTPS URLs, then fall back to downloading each Bitrix photo from the service host and uploading it to Telegram through multipart when Telegram reports an HTTP URL fetch/media error.
+- [x] (2026-06-05 13:21+03:00) Switched the production default photo delivery mode to service-side upload via `TELEGRAM_PHOTO_DELIVERY_MODE=upload`; URL-first behavior remains available as `auto` or `url`, and failed webhook processing now writes a redacted per-`bitrixId` warning to the service log.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -235,6 +236,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: Production Bitrix can provide public-looking URLs that include spaces or are reachable from the service host while Telegram rejects them with URL-content/media errors. The Telegram client now preserves the fast URL path, but for URL-fetch failures it downloads the image itself and sends `sendPhoto`, `sendMediaGroup`, or `editMessageMedia` as multipart with `attach://` media references.
   Date/Author: 2026-06-05 / Codex
 
+- Decision: Default production photo delivery to service-side upload.
+  Rationale: The URL-first fallback still depends on matching Telegram's exact error wording. Upload-first removes Telegram URL fetching from the primary path: the service downloads Bitrix photos itself and uploads files to Telegram. Operators can set `TELEGRAM_PHOTO_DELIVERY_MODE=auto` to try URL first or `url` to disable upload fallback.
+  Date/Author: 2026-06-05 / Codex
+
 - Decision: Set the documented admin notification env value to `TELEGRAM_ADMIN_CHAT_ID=609150103`.
   Rationale: The admin destination is now known, but it should remain configuration, not a hardcoded application constant.
   Date/Author: 2026-06-04 / User
@@ -243,7 +248,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
 
-2026-06-05 verification: after adding multipart upload fallback for Telegram photo URL fetch failures, `npm test` passed 79 tests in 10 files and `npm run build` passed.
+2026-06-05 verification: after adding multipart upload fallback for Telegram photo URL fetch failures, `npm test` passed 79 tests in 10 files and `npm run build` passed. After changing the default to upload-first delivery and adding failed-result logging, `npm test` passed 82 tests in 10 files and `npm run build` passed.
 
 Additional verification on 2026-06-04 at 13:22+03:00: `npm test` passed 32 tests in 7 files. A real Telegram soft-flow run in the test channel validated single-photo media edit, album item edit, appended extra photo, and shrink/no-op behavior under `soft`; created messages `38,39,40,41` were deleted successfully during cleanup. Remaining production-specific choices are exact Bitrix activity-start field and timezone, public URL field, exact meaning/routing of `pub_news_social`, and whether production wants the default non-destructive `soft` policy or explicit `rebuild` when photos are removed.
 

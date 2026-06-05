@@ -90,6 +90,7 @@ describe("TelegramBotApiClient retry policy", () => {
     const client = new TelegramBotApiClient({
       botToken: "test-token",
       chatId: "-100",
+      photoDeliveryMode: "url",
       retryAttempts: 1,
       retryDelayMs: 0,
       sleep: async () => {}
@@ -144,6 +145,7 @@ describe("TelegramBotApiClient retry policy", () => {
     const client = new TelegramBotApiClient({
       botToken: "test-token",
       chatId: "-100",
+      photoDeliveryMode: "auto",
       retryAttempts: 1,
       retryDelayMs: 0,
       sleep: async () => {}
@@ -171,6 +173,46 @@ describe("TelegramBotApiClient retry policy", () => {
     expect(form.get("photo")).toBeInstanceOf(Blob);
   });
 
+  it("uploads photo files by default without passing URLs to Telegram first", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(imageResponse("image/jpeg"))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          result: {
+            chat: { id: -100 },
+            message_id: 42
+          }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new TelegramBotApiClient({
+      botToken: "test-token",
+      chatId: "-100",
+      retryAttempts: 1,
+      retryDelayMs: 0,
+      sleep: async () => {}
+    });
+
+    await client.sendPhoto({
+      photo: {
+        url: "https://example.com/upload/photo one.jpg"
+      },
+      caption: "Caption"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://example.com/upload/photo%20one.jpg"
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/sendPhoto");
+
+    const request = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(request.body).toBeInstanceOf(FormData);
+  });
+
   it("uploads media group files when Telegram cannot fetch photo URLs", async () => {
     const fetchMock = vi
       .fn()
@@ -183,6 +225,76 @@ describe("TelegramBotApiClient retry policy", () => {
           400
         )
       )
+      .mockResolvedValueOnce(imageResponse("image/jpeg"))
+      .mockResolvedValueOnce(imageResponse("image/png"))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          result: [
+            {
+              chat: { id: -100 },
+              message_id: 42
+            },
+            {
+              chat: { id: -100 },
+              message_id: 43
+            }
+          ]
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new TelegramBotApiClient({
+      botToken: "test-token",
+      chatId: "-100",
+      photoDeliveryMode: "auto",
+      retryAttempts: 1,
+      retryDelayMs: 0,
+      sleep: async () => {}
+    });
+
+    await client.sendMediaGroup({
+      photos: [
+        {
+          url: "https://example.com/upload/photo one.jpg"
+        },
+        {
+          url: "https://example.com/upload/photo two.png"
+        }
+      ],
+      caption: "Album"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "https://example.com/upload/photo%20one.jpg"
+    );
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "https://example.com/upload/photo%20two.png"
+    );
+
+    const request = fetchMock.mock.calls[3][1] as RequestInit;
+    const form = request.body as FormData;
+    const media = JSON.parse(String(form.get("media")));
+
+    expect(media).toEqual([
+      {
+        type: "photo",
+        media: "attach://photo_0",
+        caption: "Album"
+      },
+      {
+        type: "photo",
+        media: "attach://photo_1"
+      }
+    ]);
+    expect(form.get("photo_0")).toBeInstanceOf(Blob);
+    expect(form.get("photo_1")).toBeInstanceOf(Blob);
+  });
+
+  it("uploads media group files by default without passing URLs to Telegram first", async () => {
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(imageResponse("image/jpeg"))
       .mockResolvedValueOnce(imageResponse("image/png"))
       .mockResolvedValueOnce(
@@ -222,15 +334,16 @@ describe("TelegramBotApiClient retry policy", () => {
       caption: "Album"
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[1][0]).toBe(
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toBe(
       "https://example.com/upload/photo%20one.jpg"
     );
-    expect(fetchMock.mock.calls[2][0]).toBe(
+    expect(fetchMock.mock.calls[1][0]).toBe(
       "https://example.com/upload/photo%20two.png"
     );
+    expect(String(fetchMock.mock.calls[2][0])).toContain("/sendMediaGroup");
 
-    const request = fetchMock.mock.calls[3][1] as RequestInit;
+    const request = fetchMock.mock.calls[2][1] as RequestInit;
     const form = request.body as FormData;
     const media = JSON.parse(String(form.get("media")));
 
@@ -276,6 +389,7 @@ describe("TelegramBotApiClient retry policy", () => {
     const client = new TelegramBotApiClient({
       botToken: "test-token",
       chatId: "-100",
+      photoDeliveryMode: "auto",
       retryAttempts: 1,
       retryDelayMs: 0,
       sleep: async () => {}
@@ -306,6 +420,58 @@ describe("TelegramBotApiClient retry policy", () => {
     expect(form.get("photo")).toBeInstanceOf(Blob);
   });
 
+  it("uploads replacement media by default without passing the URL to Telegram first", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(imageResponse("image/jpeg"))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          result: {
+            chat: { id: -100 },
+            message_id: 42
+          }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new TelegramBotApiClient({
+      botToken: "test-token",
+      chatId: "-100",
+      retryAttempts: 1,
+      retryDelayMs: 0,
+      sleep: async () => {}
+    });
+
+    await client.editMedia({
+      chatId: "-100",
+      messageId: 42,
+      photo: {
+        url: "https://example.com/upload/new photo.jpg"
+      },
+      caption: "Updated"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://example.com/upload/new%20photo.jpg"
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/editMessageMedia");
+
+    const request = fetchMock.mock.calls[1][1] as RequestInit;
+    const form = request.body as FormData;
+    const media = JSON.parse(String(form.get("media")));
+
+    expect(form.get("chat_id")).toBe("-100");
+    expect(form.get("message_id")).toBe("42");
+    expect(media).toEqual({
+      type: "photo",
+      media: "attach://photo",
+      caption: "Updated"
+    });
+    expect(form.get("photo")).toBeInstanceOf(Blob);
+  });
+
   it("does not download photos for non-URL Telegram errors", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(
@@ -321,6 +487,7 @@ describe("TelegramBotApiClient retry policy", () => {
     const client = new TelegramBotApiClient({
       botToken: "test-token",
       chatId: "-100",
+      photoDeliveryMode: "auto",
       retryAttempts: 1,
       retryDelayMs: 0,
       sleep: async () => {}

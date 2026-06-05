@@ -35,6 +35,12 @@ const EnvSchema = z.object({
   BITRIX_FILE_RESOLVER_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   TELEGRAM_PARSE_MODE: z.enum(["plain", "html", "markdownv2"]).default("plain"),
   TELEGRAM_MEDIA_SYNC_POLICY: z.enum(["soft", "rebuild"]).default("rebuild"),
+  TELEGRAM_PHOTO_DELIVERY_MODE: z.enum(["upload", "auto", "url"]).default("upload"),
+  TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15_000),
   TELEGRAM_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(3),
   TELEGRAM_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(500)
 });
@@ -94,6 +100,8 @@ export function loadConfig(
     bitrixFileResolverUrl: parsed.BITRIX_FILE_RESOLVER_URL,
     telegramParseMode,
     telegramMediaSyncPolicy: parsed.TELEGRAM_MEDIA_SYNC_POLICY,
+    telegramPhotoDeliveryMode: parsed.TELEGRAM_PHOTO_DELIVERY_MODE,
+    telegramPhotoDownloadTimeoutMs: parsed.TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS,
     telegramRetryAttempts: parsed.TELEGRAM_RETRY_ATTEMPTS,
     telegramRetryDelayMs: parsed.TELEGRAM_RETRY_DELAY_MS
   };

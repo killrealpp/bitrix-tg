@@ -97,3 +97,22 @@ For albums, the fallback downloads every photo and sends `sendMediaGroup` with
 This improves production reliability for URLs with spaces or hosts that Telegram
 cannot fetch directly, as long as the `bitrix-tg` server itself can download the
 image and the file is valid for Telegram.
+
+## 2026-06-05 / Photo Delivery Mode
+
+Production default is now `TELEGRAM_PHOTO_DELIVERY_MODE=upload`. In this mode,
+URL-bearing Bitrix photos are always downloaded by the service first and then
+uploaded to Telegram as files. This avoids depending on Telegram's ability to
+fetch `svarnoy-market.ru` photo URLs directly.
+
+Supported modes:
+
+- `upload` - download from Bitrix URL on the service host and upload multipart
+  to Telegram.
+- `auto` - try encoded URL first, then upload multipart when Telegram reports a
+  URL-fetch/media error.
+- `url` - only pass encoded URLs to Telegram; mostly useful for debugging.
+
+If photos still fail under `upload`, the next suspects are service-host network
+access to the image URL, invalid/empty image responses, Telegram size/type
+limits, or unresolved Bitrix file ids without URLs.

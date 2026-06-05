@@ -69,3 +69,13 @@ fallback cannot fix missing URLs, unreachable image hosts from the `bitrix-tg`
 server, invalid image files, or Telegram file-size/type limits, but it removes
 Telegram-side URL fetching as a single point of failure. Verification:
 `npm test` passed 79 tests in 10 files and `npm run build` passed.
+
+## [2026-06-05 13:21+03:00] milestone | Upload-first photo delivery
+
+The production default is now `TELEGRAM_PHOTO_DELIVERY_MODE=upload`: the service
+downloads URL-bearing Bitrix photos and uploads them to Telegram as multipart
+files without first asking Telegram to fetch the URL. `auto` keeps URL-first
+behavior with multipart fallback, and `url` keeps URL-only behavior for
+debugging. Webhook processing now logs each failed `bitrixId` with a redacted
+error so photo failures are visible in `journalctl`. Verification: `npm test`
+passed 82 tests in 10 files and `npm run build` passed.

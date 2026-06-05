@@ -29,6 +29,23 @@ describe("loadConfig", () => {
     expect(config.telegramRetryDelayMs).toBe(125);
   });
 
+  it("defaults Telegram photo delivery to service-side upload", () => {
+    const config = loadConfig({});
+
+    expect(config.telegramPhotoDeliveryMode).toBe("upload");
+    expect(config.telegramPhotoDownloadTimeoutMs).toBe(15_000);
+  });
+
+  it("loads Telegram photo delivery settings from env", () => {
+    const config = loadConfig({
+      TELEGRAM_PHOTO_DELIVERY_MODE: "auto",
+      TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS: "30000"
+    });
+
+    expect(config.telegramPhotoDeliveryMode).toBe("auto");
+    expect(config.telegramPhotoDownloadTimeoutMs).toBe(30_000);
+  });
+
   it("defaults media sync policy to rebuild", () => {
     const config = loadConfig({});
 
@@ -71,5 +88,7 @@ describe("loadConfig", () => {
     expect(example).toContain("TELEGRAM_ADMIN_CHAT_ID=609150103");
     expect(example).toContain("SQLITE_DB_PATH=./data/bitrix-tg.sqlite");
     expect(example).toContain("BITRIX_FILE_RESOLVER_URL=");
+    expect(example).toContain("TELEGRAM_PHOTO_DELIVERY_MODE=upload");
+    expect(example).toContain("TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS=15000");
   });
 });

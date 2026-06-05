@@ -761,6 +761,59 @@ describe("processBitrixEvent", () => {
     expect(db.messages.map((message) => message.role)).toEqual(["text"]);
   });
 
+  it("rebuild policy replaces a changed multi-photo album through sendMediaGroup", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 28,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Album",
+        all_properties: {
+          PHOTOS: [
+            { url: "https://example.com/old-a.jpg" },
+            { url: "https://example.com/old-b.jpg" }
+          ]
+        }
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 28,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Album",
+        all_properties: {
+          PHOTOS: [
+            { url: "https://example.com/new-a.jpg" },
+            { url: "https://example.com/new-b.jpg" }
+          ]
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendMediaGroup",
+      "deleteMessage",
+      "deleteMessage",
+      "sendMediaGroup"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/new-a.jpg",
+      "https://example.com/new-b.jpg"
+    ]);
+    expect(db.messages.map((message) => message.role)).toEqual([
+      "album_item",
+      "album_item"
+    ]);
+  });
+
   it("fails active social posts with unresolved Bitrix photo ids instead of publishing text-only", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();

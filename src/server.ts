@@ -15,10 +15,11 @@ import type { DbGateway } from "./db/DbGateway";
 import { openSqliteGateway } from "./db/SqliteGateway";
 import {
   processBitrixEvent,
-  type MissingScheduleTimeAdminNotifier
+  type MissingScheduleTimeAdminNotifier,
+  type ProcessResult
 } from "./poster/processBitrixEvent";
 import { runDuePosts } from "./scheduler/runDuePosts";
-import { redactErrorForLog } from "./security/redaction";
+import { redactErrorForLog, redactSensitiveText } from "./security/redaction";
 import {
   TelegramBotApiClient,
   type TelegramClient
@@ -96,7 +97,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
       const events = parseBitrixWebhook(request.body, {
         activeFromField: deps.config.bitrixActiveFromField
       });
-      const results = [];
+      const results: ProcessResult[] = [];
 
       for (const event of events) {
         results.push(
@@ -109,6 +110,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
           })
         );
       }
+      logFailedProcessingResults(app, results, logSecrets);
 
       return {
         ok: true,
@@ -135,6 +137,29 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
   });
 
   return app;
+}
+
+function logFailedProcessingResults(
+  app: FastifyInstance,
+  results: ProcessResult[],
+  logSecrets: string[]
+): void {
+  for (const result of results) {
+    if (result.status !== "failed") {
+      continue;
+    }
+
+    app.log.warn(
+      {
+        bitrixId: result.bitrixId,
+        reason: result.reason,
+        error: result.error
+          ? redactSensitiveText(result.error, logSecrets)
+          : undefined
+      },
+      "Bitrix event processing failed"
+    );
+  }
 }
 
 function isValidWebhookSecret(
@@ -171,6 +196,8 @@ export async function startServer(): Promise<void> {
     chatId: config.telegramChatId ?? "",
     messageThreadId: config.telegramMessageThreadId,
     parseMode: config.telegramParseMode,
+    photoDeliveryMode: config.telegramPhotoDeliveryMode,
+    photoDownloadTimeoutMs: config.telegramPhotoDownloadTimeoutMs,
     retryAttempts: config.telegramRetryAttempts,
     retryDelayMs: config.telegramRetryDelayMs
   });

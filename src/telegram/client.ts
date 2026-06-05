@@ -70,11 +70,14 @@ export interface TelegramBotApiClientOptions {
   messageThreadId?: number;
   parseMode?: "HTML" | "MarkdownV2";
   apiBaseUrl?: string;
+  photoDeliveryMode?: TelegramPhotoDeliveryMode;
   photoDownloadTimeoutMs?: number;
   retryAttempts?: number;
   retryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
+
+export type TelegramPhotoDeliveryMode = "upload" | "auto" | "url";
 
 interface TelegramApiResponse<T> {
   ok: boolean;
@@ -97,6 +100,7 @@ interface TelegramApiMessage {
 
 export class TelegramBotApiClient implements TelegramClient {
   private readonly apiBaseUrl: string;
+  private readonly photoDeliveryMode: TelegramPhotoDeliveryMode;
   private readonly photoDownloadTimeoutMs: number;
   private readonly retryAttempts: number;
   private readonly retryDelayMs: number;
@@ -104,6 +108,7 @@ export class TelegramBotApiClient implements TelegramClient {
 
   constructor(private readonly options: TelegramBotApiClientOptions) {
     this.apiBaseUrl = options.apiBaseUrl ?? "https://api.telegram.org";
+    this.photoDeliveryMode = options.photoDeliveryMode ?? "upload";
     this.photoDownloadTimeoutMs = Math.max(
       1,
       options.photoDownloadTimeoutMs ?? 15_000
@@ -138,6 +143,12 @@ export class TelegramBotApiClient implements TelegramClient {
   async sendPhoto(input: SendPhotoInput): Promise<TelegramMessageRef> {
     const photoUrl = requireResolvedPhotoUrl(input.photo);
     let result: TelegramApiMessage;
+
+    if (this.photoDeliveryMode === "upload") {
+      result = await this.sendPhotoAsUpload(input, photoUrl);
+      return toMessageRef(result, input.role ?? "photo", 0, photoUrl);
+    }
+
     try {
       result = await this.call<TelegramApiMessage>("sendPhoto", {
         chat_id: this.options.chatId,
@@ -147,7 +158,10 @@ export class TelegramBotApiClient implements TelegramClient {
         parse_mode: this.options.parseMode
       });
     } catch (error) {
-      if (!shouldUploadPhotoFallback(error)) {
+      if (
+        this.photoDeliveryMode !== "auto" ||
+        !shouldUploadPhotoFallback(error)
+      ) {
         throw error;
       }
 
@@ -160,6 +174,14 @@ export class TelegramBotApiClient implements TelegramClient {
   async sendMediaGroup(input: SendMediaGroupInput): Promise<TelegramMessageRef[]> {
     const photoUrls = input.photos.map(requireResolvedPhotoUrl);
     let result: TelegramApiMessage[];
+
+    if (this.photoDeliveryMode === "upload") {
+      result = await this.sendMediaGroupAsUpload(input, photoUrls);
+      return result.map((message, index) =>
+        toMessageRef(message, input.role ?? "album_item", index, photoUrls[index])
+      );
+    }
+
     try {
       result = await this.call<TelegramApiMessage[]>("sendMediaGroup", {
         chat_id: this.options.chatId,
@@ -172,7 +194,10 @@ export class TelegramBotApiClient implements TelegramClient {
         }))
       });
     } catch (error) {
-      if (!shouldUploadPhotoFallback(error)) {
+      if (
+        this.photoDeliveryMode !== "auto" ||
+        !shouldUploadPhotoFallback(error)
+      ) {
         throw error;
       }
 
@@ -198,6 +223,17 @@ export class TelegramBotApiClient implements TelegramClient {
   async editMedia(input: EditMediaInput): Promise<TelegramMessageRef> {
     const photoUrl = requireResolvedPhotoUrl(input.photo);
     let result: TelegramApiMessage;
+
+    if (this.photoDeliveryMode === "upload") {
+      result = await this.editMediaAsUpload(input, photoUrl);
+      return toMessageRef(
+        result,
+        input.role ?? "photo",
+        input.mediaIndex ?? 0,
+        photoUrl
+      );
+    }
+
     try {
       result = await this.call<TelegramApiMessage>("editMessageMedia", {
         chat_id: input.chatId,
@@ -210,7 +246,10 @@ export class TelegramBotApiClient implements TelegramClient {
         }
       });
     } catch (error) {
-      if (!shouldUploadPhotoFallback(error)) {
+      if (
+        this.photoDeliveryMode !== "auto" ||
+        !shouldUploadPhotoFallback(error)
+      ) {
         throw error;
       }
 
@@ -348,7 +387,7 @@ export class TelegramBotApiClient implements TelegramClient {
   private async sendPhotoAsUpload(
     input: SendPhotoInput,
     photoUrl: string,
-    directError: unknown
+    directError?: unknown
   ): Promise<TelegramApiMessage> {
     try {
       const upload = await this.downloadPhotoUpload(photoUrl, "photo");
@@ -364,14 +403,14 @@ export class TelegramBotApiClient implements TelegramClient {
         )
       );
     } catch (fallbackError) {
-      throw withFallbackFailureContext(directError, fallbackError);
+      throw withFallbackFailureContext(fallbackError, directError);
     }
   }
 
   private async sendMediaGroupAsUpload(
     input: SendMediaGroupInput,
     photoUrls: string[],
-    directError: unknown
+    directError?: unknown
   ): Promise<TelegramApiMessage[]> {
     try {
       const uploads = await Promise.all(
@@ -396,14 +435,14 @@ export class TelegramBotApiClient implements TelegramClient {
         )
       );
     } catch (fallbackError) {
-      throw withFallbackFailureContext(directError, fallbackError);
+      throw withFallbackFailureContext(fallbackError, directError);
     }
   }
 
   private async editMediaAsUpload(
     input: EditMediaInput,
     photoUrl: string,
-    directError: unknown
+    directError?: unknown
   ): Promise<TelegramApiMessage> {
     try {
       const upload = await this.downloadPhotoUpload(photoUrl, "photo");
@@ -423,7 +462,7 @@ export class TelegramBotApiClient implements TelegramClient {
         )
       );
     } catch (fallbackError) {
-      throw withFallbackFailureContext(directError, fallbackError);
+      throw withFallbackFailureContext(fallbackError, directError);
     }
   }
 
@@ -562,14 +601,29 @@ function shouldUploadPhotoFallback(error: unknown): boolean {
     "wrong file identifier/http url specified",
     "invalid file http url specified",
     "wrong type of the web page content",
-    "url host is empty"
+    "url host is empty",
+    "invalid url",
+    "unsupported url protocol",
+    "can't get remote file content",
+    "cannot get remote file content",
+    "failed to get remote file content",
+    "failed to download",
+    "failed to fetch",
+    "couldn't fetch",
+    "webpage_curl_failed"
   ].some((pattern) => message.includes(pattern));
 }
 
 function withFallbackFailureContext(
-  directError: unknown,
-  fallbackError: unknown
+  fallbackError: unknown,
+  directError?: unknown
 ): Error {
+  if (directError === undefined) {
+    return fallbackError instanceof Error
+      ? fallbackError
+      : new Error(getErrorMessage(fallbackError));
+  }
+
   return new Error(
     [
       getErrorMessage(directError),
