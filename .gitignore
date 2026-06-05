@@ -1,0 +1,42 @@
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local Codex overrides
+.codex/
+.agents/skills/
+
+# Ruflo / Claude Flow runtime state
+.claude/
+.swarm/
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+.claude-flow/*
+!.claude-flow/.gitignore
+!.claude-flow/CAPABILITIES.md
+!.claude-flow/config.yaml
+
+# Logs and temporary files
+*.log
+*.tmp
+*.pid
+data/
+*.sqlite
+*.sqlite-*
+
+.env
+data/
+.swarm/
+.claude-flow runtime
+node_modules/
+dist/
+logs/

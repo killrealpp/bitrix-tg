@@ -1,0 +1,100 @@
+import dotenv from "dotenv";
+import { z } from "zod";
+
+dotenv.config();
+
+const emptyToUndefined = (value: unknown) => {
+  if (typeof value === "string" && value.trim() === "") {
+    return undefined;
+  }
+
+  return value;
+};
+
+const EnvSchema = z.object({
+  PORT: z.coerce.number().int().positive().default(18080),
+  NODE_ENV: z.string().default("development"),
+  DB_ACCESS_MODE: z
+    .enum(["sqlite", "direct_postgres", "n8n_gateway"])
+    .default("sqlite"),
+  SQLITE_DB_PATH: z.string().default("./data/bitrix-tg.sqlite"),
+  DATABASE_URL: z.preprocess(emptyToUndefined, z.string().optional()),
+  N8N_DB_GATEWAY_URL: z.preprocess(emptyToUndefined, z.string().optional()),
+  N8N_DB_GATEWAY_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  TELEGRAM_BOT_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  TELEGRAM_CHAT_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  TELEGRAM_ADMIN_CHAT_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  TELEGRAM_MESSAGE_THREAD_ID: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().positive().optional()
+  ),
+  OPENAI_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
+  WEBHOOK_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  BITRIX_ACTIVE_FROM_FIELD: z.preprocess(emptyToUndefined, z.string().optional()),
+  BITRIX_FILE_RESOLVER_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  TELEGRAM_PARSE_MODE: z.enum(["plain", "html", "markdownv2"]).default("plain"),
+  TELEGRAM_MEDIA_SYNC_POLICY: z.enum(["soft", "rebuild"]).default("rebuild"),
+  TELEGRAM_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  TELEGRAM_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(500)
+});
+
+export type AppConfig = ReturnType<typeof loadConfig>;
+
+export interface LoadConfigOptions {
+  requireTelegram?: boolean;
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  options: LoadConfigOptions = {}
+) {
+  const parsed = EnvSchema.parse(env);
+
+  if (parsed.DB_ACCESS_MODE !== "sqlite") {
+    throw new Error(
+      `DB_ACCESS_MODE=${parsed.DB_ACCESS_MODE} is documented for later use but not implemented yet`
+    );
+  }
+
+  if (options.requireTelegram) {
+    if (!parsed.TELEGRAM_BOT_TOKEN) {
+      throw new Error("TELEGRAM_BOT_TOKEN is required to start the real server");
+    }
+
+    if (!parsed.TELEGRAM_CHAT_ID) {
+      throw new Error("TELEGRAM_CHAT_ID is required to start the real server");
+    }
+
+  }
+
+  const telegramParseMode: "HTML" | "MarkdownV2" | undefined =
+    parsed.TELEGRAM_PARSE_MODE === "plain"
+      ? undefined
+      : parsed.TELEGRAM_PARSE_MODE === "html"
+        ? "HTML"
+        : "MarkdownV2";
+
+  return {
+    port: parsed.PORT,
+    nodeEnv: parsed.NODE_ENV,
+    dbAccessMode: parsed.DB_ACCESS_MODE,
+    sqliteDbPath: parsed.SQLITE_DB_PATH,
+    databaseUrl: parsed.DATABASE_URL,
+    n8nDbGatewayUrl: parsed.N8N_DB_GATEWAY_URL,
+    n8nDbGatewaySecret: parsed.N8N_DB_GATEWAY_SECRET,
+    telegramBotToken: parsed.TELEGRAM_BOT_TOKEN,
+    telegramChatId: parsed.TELEGRAM_CHAT_ID,
+    telegramAdminChatId: parsed.TELEGRAM_ADMIN_CHAT_ID,
+    telegramMessageThreadId: parsed.TELEGRAM_MESSAGE_THREAD_ID,
+    openAiApiKey: parsed.OPENAI_API_KEY,
+    openAiModel: parsed.OPENAI_MODEL,
+    webhookSecret: parsed.WEBHOOK_SECRET,
+    bitrixActiveFromField: parsed.BITRIX_ACTIVE_FROM_FIELD,
+    bitrixFileResolverUrl: parsed.BITRIX_FILE_RESOLVER_URL,
+    telegramParseMode,
+    telegramMediaSyncPolicy: parsed.TELEGRAM_MEDIA_SYNC_POLICY,
+    telegramRetryAttempts: parsed.TELEGRAM_RETRY_ATTEMPTS,
+    telegramRetryDelayMs: parsed.TELEGRAM_RETRY_DELAY_MS
+  };
+}

@@ -1,0 +1,53 @@
+[
+  {
+    "headers": {
+      "content-type": "application/json",
+      "x-forwarded-proto": "https"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "action": "update",
+      "iblock_id": "151",
+      "iblock_code": "",
+      "iblock_name": "Новости",
+      "element_id": 181695,
+      "name": "super3-3-3",
+      "code": "super3",
+      "date_create": "03.06.2026 13:53:58",
+      "date_modify": "05.06.2026 09:08:30",
+      "active_from": "11.06.2026 00:05:00",
+      "active_to": "",
+      "active": "N",
+      "sort": "500",
+      "preview_text": "",
+      "detail_text": "super3",
+      "pub_news_social": "2976",
+      "pub_news_social_id": 9137,
+      "url": "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=181695",
+      "iblock_type": "aspro_premier_content",
+      "all_properties": {
+        "BLOG_POST_ID": null,
+        "BLOG_COMMENTS_CNT": null,
+        "LINK_REGION": null,
+        "SHOW_ON_INDEX_PAGE": null,
+        "PHOTOPOS": "1507",
+        "VIDEO": "",
+        "VIDEO_IFRAME": null,
+        "DOCUMENTS": null,
+        "REDIRECT": null,
+        "PHOTOS": "253902",
+        "LINK_GOODS": null,
+        "LINK_GOODS_FILTER": "[]",
+        "LINK_ARTICLES": null,
+        "LINK_TIZERS": null,
+        "LINK_SERVICES": null,
+        "LINK_SALE": null,
+        "LINK_FAQ": null,
+        "pub_news_social": "2976"
+      }
+    },
+    "webhookUrl": "https://example.invalid/webhook/redacted",
+    "executionMode": "production"
+  }
+]

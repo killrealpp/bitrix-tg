@@ -1,0 +1,21 @@
+[
+  {
+    "body": {
+      "action": "update",
+      "element_id": 181692,
+      "active": "N",
+      "name": "Sample title",
+      "preview_text": "Sample preview",
+      "detail_text": "Sample detail",
+      "pub_news_social": "2976",
+      "all_properties": {
+        "PHOTOS": {
+          "id": "253888",
+          "url": "https://example.com/upload/photo.jpg",
+          "path": "/upload/photo.jpg"
+        },
+        "pub_news_social": "2976"
+      }
+    }
+  }
+]

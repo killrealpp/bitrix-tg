@@ -1,0 +1,41 @@
+[
+  {
+    "headers": {
+      "content-type": "application/json",
+      "x-forwarded-proto": "https"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "action": "update",
+      "iblock_id": "151",
+      "element_id": 181696,
+      "name": "Sanitized production album sample",
+      "date_create": "03.06.2026 13:53:58",
+      "date_modify": "04.06.2026 15:20:00",
+      "active_from": "11.06.2026 00:05:00",
+      "active": "N",
+      "preview_text": "Sample preview",
+      "detail_text": "Sample detail",
+      "pub_news_social": "2976",
+      "url": "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=181696",
+      "all_properties": {
+        "PHOTOS": [
+          {
+            "id": "253888",
+            "url": "https://example.com/upload/iblock/b45/2026-01-15 19.47.41.jpg",
+            "path": "/upload/iblock/b45/2026-01-15 19.47.41.jpg"
+          },
+          {
+            "id": "253889",
+            "url": "https://example.com/upload/iblock/b45/album photo 2.jpg",
+            "path": "/upload/iblock/b45/album photo 2.jpg"
+          }
+        ],
+        "pub_news_social": "2976"
+      }
+    },
+    "webhookUrl": "https://example.invalid/webhook/redacted",
+    "executionMode": "production"
+  }
+]
