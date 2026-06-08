@@ -21,6 +21,8 @@ import {
 } from "./poster/processBitrixEvent";
 import { runDuePosts } from "./scheduler/runDuePosts";
 import { redactErrorForLog, redactSensitiveText } from "./security/redaction";
+import type { TextFitOptions } from "./text/fitText";
+import { createOpenRouterTextFit } from "./text/openRouterTextFit";
 import {
   TelegramBotApiClient,
   type TelegramClient
@@ -43,8 +45,11 @@ export interface BuildAppDeps {
       | "bitrixLocalUtcOffsetMinutes"
       | "bitrixFileResolverUrl"
       | "telegramMediaSyncPolicy"
+      | "openAiApiKey"
+      | "openRouterApiKey"
     >
   >;
+  textFit?: TextFitOptions;
 }
 
 const WEBHOOK_SECRET_HEADER = "x-webhook-secret";
@@ -111,6 +116,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
             telegram: deps.telegram,
             adminNotifier: deps.adminNotifier,
             photoResolver: deps.photoResolver,
+            textFit: deps.textFit,
             mediaSyncPolicy: deps.config.telegramMediaSyncPolicy,
             requireExactScheduleTime:
               deps.config.bitrixRequireExactActiveFrom ?? false
@@ -303,11 +309,22 @@ export async function startServer(): Promise<void> {
         endpointUrl: config.bitrixFileResolverUrl
       })
     : undefined;
+  const textFit = config.openRouterApiKey
+    ? createOpenRouterTextFit({
+        apiKey: config.openRouterApiKey,
+        model: config.openRouterModel,
+        apiBaseUrl: config.openRouterApiBaseUrl,
+        siteUrl: config.openRouterSiteUrl,
+        appTitle: config.openRouterAppTitle,
+        timeoutMs: config.openRouterTimeoutMs
+      })
+    : undefined;
   const app = buildApp({
     db,
     telegram,
     adminNotifier,
     photoResolver,
+    textFit,
     config
   });
 
@@ -317,7 +334,8 @@ export async function startServer(): Promise<void> {
         db,
         telegram,
         adminNotifier,
-        photoResolver
+        photoResolver,
+        textFit
       });
       if (result.checked > 0 || result.published > 0 || result.failed > 0) {
         app.log.info({ result }, "Scheduled publishing worker result");
@@ -347,7 +365,9 @@ if (require.main === module) {
     console.error(
       redactErrorForLog(error, [
         process.env.TELEGRAM_BOT_TOKEN,
-        process.env.WEBHOOK_SECRET
+        process.env.WEBHOOK_SECRET,
+        process.env.OPENAI_API_KEY,
+        process.env.OPENROUTER_API_KEY
       ])
     );
     process.exit(1);
@@ -355,9 +375,19 @@ if (require.main === module) {
 }
 
 function getLogSecrets(
-  config: Partial<Pick<AppConfig, "telegramBotToken" | "webhookSecret">>
+  config: Partial<
+    Pick<
+      AppConfig,
+      "telegramBotToken" | "webhookSecret" | "openAiApiKey" | "openRouterApiKey"
+    >
+  >
 ): string[] {
-  return [config.telegramBotToken, config.webhookSecret].filter(
+  return [
+    config.telegramBotToken,
+    config.webhookSecret,
+    config.openAiApiKey,
+    config.openRouterApiKey
+  ].filter(
     (value): value is string => Boolean(value)
   );
 }

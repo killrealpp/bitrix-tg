@@ -87,6 +87,32 @@ describe("loadConfig", () => {
     );
   });
 
+  it("loads OpenRouter text fitting settings from env", () => {
+    const config = loadConfig({
+      OPENROUTER_API_KEY: "openrouter-secret",
+      OPENROUTER_MODEL: "anthropic/claude-3.5-haiku",
+      OPENROUTER_SITE_URL: "https://svarnoy-market.ru",
+      OPENROUTER_APP_TITLE: "Svarnoy Bot",
+      OPENROUTER_TIMEOUT_MS: "30000"
+    });
+
+    expect(config.openRouterApiKey).toBe("openrouter-secret");
+    expect(config.openRouterModel).toBe("anthropic/claude-3.5-haiku");
+    expect(config.openRouterSiteUrl).toBe("https://svarnoy-market.ru");
+    expect(config.openRouterAppTitle).toBe("Svarnoy Bot");
+    expect(config.openRouterTimeoutMs).toBe(30_000);
+  });
+
+  it("keeps OPENAI_API_KEY and OPENAI_MODEL as OpenRouter-compatible fallbacks", () => {
+    const config = loadConfig({
+      OPENAI_API_KEY: "legacy-openrouter-secret",
+      OPENAI_MODEL: "gpt-4.1-mini"
+    });
+
+    expect(config.openRouterApiKey).toBe("legacy-openrouter-secret");
+    expect(config.openRouterModel).toBe("openai/gpt-4.1-mini");
+  });
+
   it("does not require the Bitrix file resolver URL when Telegram env is complete", () => {
     const config = loadConfig(
       {
@@ -109,5 +135,7 @@ describe("loadConfig", () => {
     expect(example).toContain("BITRIX_LOCAL_UTC_OFFSET_MINUTES=180");
     expect(example).toContain("TELEGRAM_PHOTO_DELIVERY_MODE=upload");
     expect(example).toContain("TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS=15000");
+    expect(example).toContain("OPENROUTER_API_KEY=");
+    expect(example).toContain("OPENROUTER_MODEL=openai/gpt-4.1-mini");
   });
 });

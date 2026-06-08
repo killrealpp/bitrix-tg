@@ -36,6 +36,7 @@ tags:
 - webhook security пока остается простой: достаточно сделать рабочий trusted webhook path без IP allowlist/request signature.
 - preferred production photo mapping is `body.all_properties.PHOTOS` as an array of `{ id, url, path }`; for this payload shape no Bitrix file resolver is needed.
 - admin notification target is `TELEGRAM_ADMIN_CHAT_ID=609150103`, configured through env.
+- AI provider for release is OpenRouter. AI runs only when Telegram text/caption exceeds its hard limit; otherwise the original text is published unchanged. `OPENAI_API_KEY`/`OPENAI_MODEL` remain fallback aliases for the existing local env.
 
 ## 2026-06-05 / Closed for Telegram Release
 
@@ -71,7 +72,7 @@ tags:
 
 ## ИИ
 
-11. Какой AI-провайдер использовать для подгонки текста?
+11. Решено для релиза: OpenRouter через `OPENROUTER_API_KEY` и `OPENROUTER_MODEL`; legacy `OPENAI_API_KEY`/`OPENAI_MODEL` остаются fallback-алиасами.
 12. Разрешено ли ИИ сокращать заголовок `name`, или заголовок должен оставаться неизменным?
 13. Нужно ли логировать исходный и финальный текст для ручной проверки?
 

@@ -40,6 +40,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-06-05 13:50+03:00) Fixed photo detection before Telegram: parser now recognizes Bitrix/PHP photo variants with `URL`, `SRC`, `ID`, `FILE_ID`, `VALUE` wrappers, numeric object maps, JSON-string photo arrays, comma-separated file ids, and `preview_picture`/`detail_picture` fallbacks. Webhook logs now include `photoCount`, `photoIds`, and `unresolvedPhotoCount` for every parsed event.
 - [x] (2026-06-05 14:25+03:00) Fixed production scheduling time semantics: Bitrix local date strings without explicit timezone are parsed with `BITRIX_LOCAL_UTC_OFFSET_MINUTES=180`, `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true` blocks active/social posts without an exact time, invalid time values preserve source details for admin notifications, and the scheduler logs non-empty worker results.
 - [x] (2026-06-08 11:15+03:00) Tightened production `rebuild` media sync for text/mixed posts: when photos are added to a text post or changed/removed from an old mixed post, the service deletes all Telegram messages for that Bitrix element and republishes the current text/photo state. Added regression coverage for text->media_group, mixed->media_group, mixed->text, and multiple due scheduled posts in one worker run.
+- [x] (2026-06-08 11:45+03:00) Added OpenRouter-backed AI text fitting: short texts bypass AI, over-limit text/captions call OpenRouter through `OPENROUTER_*` env, legacy `OPENAI_*` env remains a fallback, and AI failure or too-long AI output falls back to deterministic truncation.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -126,6 +127,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - Decision: Treat AI usage as text fitting, not creative rewriting.
   Rationale: The user explicitly stated that the goal is to fit Telegram limits, not to change the text unnecessarily.
   Date/Author: 2026-06-04 / Codex
+
+- Decision: Use OpenRouter for production AI text fitting, but call it only when Telegram hard limits are exceeded.
+  Rationale: The user has an OpenRouter token, and short texts should not be changed or slowed down. OpenRouter failures must not block publication, so deterministic truncation remains the final fallback.
+  Date/Author: 2026-06-08 / Codex
 
 - Decision: Default to plain text Telegram formatting until the user confirms HTML or MarkdownV2.
   Rationale: Plain text avoids entity parsing errors and makes length checks more reliable for the first working version.
@@ -275,6 +280,8 @@ Additional verification on 2026-06-05 at 09:15+03:00: `npm test` passed 62 tests
 
 Additional verification on 2026-06-05 at 09:56+03:00: `npm test` passed 75 tests in 10 files, and `npm run build` passed. New coverage proves that the service defaults to port `18080`, the HTTP Bitrix photo resolver calls `POST { "ids": [...] }`, URL-bearing photo arrays do not call the resolver, raw `PHOTOS: "253902"` can publish after resolver URL mapping, mixed URL/id photo arrays publish as media groups after partial resolution, unresolved resolver results fail without Telegram calls and notify the admin, the webhook route passes the resolver dependency, and the scheduled worker resolves old stored photo ids before publishing. A non-mutating Telegram credentials check also confirmed `getMe` and `getChat` succeed for the current ignored `.env`.
 
+Additional verification on 2026-06-08 at 11:55+03:00: `npm test` passed 119 tests in 11 files, and `npm run build` passed. New coverage proves that short texts bypass AI, over-limit text/captions use the injected text fitter, empty AI responses, AI failures, and over-limit AI responses fall back to deterministic truncation, webhook and scheduled publication store fitted text, OpenRouter requests use the chat-completions contract, and OpenRouter/OpenAI secret-shaped values are redacted from errors.
+
 ## Context and Orientation
 
 The repository is currently empty except for documentation created for this project. The requirements wiki lives in `docs/wiki`. The most important files are:
@@ -293,7 +300,7 @@ Telegram has different limits for different message types. A normal text message
 
 ## Assumptions To Use Unless The User Overrides Them
 
-Use Node.js with TypeScript for the first implementation. Use Fastify for HTTP routing, SQLite for the MVP durable state, direct Telegram Bot API calls through `fetch`, and the OpenAI API for optional text fitting. These choices keep the service small, explicit, independent from n8n, and easy to test.
+Use Node.js with TypeScript for the first implementation. Use Fastify for HTTP routing, SQLite for the MVP durable state, direct Telegram Bot API calls through `fetch`, and OpenRouter for optional text fitting only when Telegram limits are exceeded. These choices keep the service small, explicit, independent from n8n, and easy to test.
 
 Use `sqlite` as the default database access mode. The service owns its SQLite file and creates tables through migrations. This keeps the service independent from n8n and from the Postgres container that currently exists only inside n8n's docker-compose setup. Keep `direct_postgres` available as a later production path if the service is deployed into a shared docker-compose network, and keep `n8n_gateway` only as an emergency bridge.
 
@@ -312,7 +319,13 @@ Use these additional environment variables:
 - `SQLITE_DB_PATH`, defaulting to `./data/bitrix-tg.sqlite`
 - `N8N_DB_GATEWAY_URL`
 - `N8N_DB_GATEWAY_SECRET`
-- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`, defaulting to `openai/gpt-4.1-mini`
+- `OPENROUTER_API_BASE_URL`, defaulting to `https://openrouter.ai/api/v1`
+- `OPENROUTER_SITE_URL`
+- `OPENROUTER_APP_TITLE`, defaulting to `bitrix-tg`
+- `OPENROUTER_TIMEOUT_MS`, defaulting to `20000`
+- `OPENAI_API_KEY` and `OPENAI_MODEL` as backward-compatible OpenRouter fallbacks
 - `WEBHOOK_SECRET`, if webhook authentication is enabled
 - `PORT`, defaulting to `18080`
 

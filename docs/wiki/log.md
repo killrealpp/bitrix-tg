@@ -121,3 +121,17 @@ Regression coverage now includes text->media_group, mixed->media_group,
 mixed->text, the existing soft behavior when explicitly configured, and multiple
 due scheduled posts being published in one worker run. Verification:
 `npm test` passed 111 tests in 10 files and `npm run build` passed.
+
+## [2026-06-08 11:45+03:00] milestone | OpenRouter text fitting
+
+AI text fitting is now wired for the release through OpenRouter. The service
+checks Telegram limits first: short text is published unchanged and does not
+call AI; only over-limit text or captions call the configured OpenRouter chat
+completion model. `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` are the primary env
+settings, while legacy `OPENAI_API_KEY`/`OPENAI_MODEL` still work as fallbacks
+for the user's existing ignored `.env`.
+
+If OpenRouter fails, returns empty text, or returns text that still exceeds
+Telegram limits, the publication continues with deterministic truncation.
+Verification: `npm test` passed 119 tests in 11 files and `npm run build`
+passed.

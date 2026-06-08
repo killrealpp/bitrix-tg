@@ -1,0 +1,141 @@
+import { redactSensitiveText } from "../security/redaction";
+import type { TextFitOptions, TextFitRequest } from "./fitText";
+
+export interface OpenRouterTextFitOptions {
+  apiKey: string;
+  model: string;
+  apiBaseUrl?: string;
+  siteUrl?: string;
+  appTitle?: string;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+interface OpenRouterChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    };
+  }>;
+  error?: {
+    message?: unknown;
+  };
+}
+
+export function createOpenRouterTextFit(
+  options: OpenRouterTextFitOptions
+): TextFitOptions {
+  const client = new OpenRouterTextFitter(options);
+  return {
+    aiFit: (request) => client.fit(request)
+  };
+}
+
+export class OpenRouterTextFitter {
+  private readonly apiBaseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(private readonly options: OpenRouterTextFitOptions) {
+    this.apiBaseUrl = options.apiBaseUrl ?? "https://openrouter.ai/api/v1";
+    this.timeoutMs = Math.max(1, options.timeoutMs ?? 20_000);
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  async fit(request: TextFitRequest): Promise<string> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await this.fetchImpl(
+        `${this.apiBaseUrl.replace(/\/+$/, "")}/chat/completions`,
+        {
+          method: "POST",
+          headers: this.buildHeaders(),
+          body: JSON.stringify({
+            model: this.options.model,
+            messages: buildMessages(request),
+            temperature: 0.2,
+            max_tokens: Math.max(64, Math.ceil(request.target / 3)),
+            stream: false
+          }),
+          signal: controller.signal
+        }
+      );
+
+      const data = (await response.json()) as OpenRouterChatResponse;
+      if (!response.ok) {
+        throw new Error(
+          `OpenRouter text fitting failed with HTTP ${response.status}: ${getOpenRouterError(data)}`
+        );
+      }
+
+      const content = data.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || content.trim() === "") {
+        throw new Error("OpenRouter text fitting returned an empty response");
+      }
+
+      return content.trim();
+    } catch (error) {
+      throw new Error(
+        redactSensitiveText(
+          error instanceof Error ? error.message : String(error),
+          [this.options.apiKey]
+        )
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.options.apiKey}`,
+      "content-type": "application/json"
+    };
+
+    if (this.options.siteUrl) {
+      headers["HTTP-Referer"] = this.options.siteUrl;
+    }
+
+    if (this.options.appTitle) {
+      headers["X-OpenRouter-Title"] = this.options.appTitle;
+    }
+
+    return headers;
+  }
+}
+
+function buildMessages(request: TextFitRequest): Array<{
+  role: "system" | "user";
+  content: string;
+}> {
+  return [
+    {
+      role: "system",
+      content: [
+        "You shorten Bitrix news text for Telegram.",
+        "Preserve facts, dates, names, prices, addresses, product names, and links.",
+        "Do not add new facts, hashtags, greetings, or explanations.",
+        "Keep the original language and neutral tone.",
+        "Return only the final text."
+      ].join(" ")
+    },
+    {
+      role: "user",
+      content: [
+        `Task: shorten this Telegram ${request.kind} to at most ${request.target} characters.`,
+        `Hard limit: ${request.limit} characters.`,
+        "Text:",
+        request.text
+      ].join("\n")
+    }
+  ];
+}
+
+function getOpenRouterError(data: OpenRouterChatResponse): string {
+  const message = data.error?.message;
+  return redactSensitiveText(
+    typeof message === "string" && message.trim() ? message : "unknown error"
+  );
+}

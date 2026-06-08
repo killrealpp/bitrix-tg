@@ -29,7 +29,7 @@ export function redactSensitiveText(
       `$1${REDACTED}`
     )
     .replace(
-      /((?:["'])?\b(?:TELEGRAM_BOT_TOKEN|WEBHOOK_SECRET)(?:["'])?\s*[:=]\s*(?:["'])?)[^"',;\s}&]+/gi,
+      /((?:["'])?\b(?:TELEGRAM_BOT_TOKEN|WEBHOOK_SECRET|OPENAI_API_KEY|OPENROUTER_API_KEY)(?:["'])?\s*[:=]\s*(?:["'])?)[^"',;\s}&]+/gi,
       `$1${REDACTED}`
     );
 }

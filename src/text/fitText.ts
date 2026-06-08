@@ -47,9 +47,15 @@ async function fitText(
   }
 
   if (options.aiFit) {
-    const fitted = (await options.aiFit({ text: normalized, limit, target, kind })).trim();
-    if (fitted.length <= limit) {
-      return fitted;
+    try {
+      const fitted = (
+        await options.aiFit({ text: normalized, limit, target, kind })
+      ).trim();
+      if (fitted.length > 0 && fitted.length <= limit) {
+        return fitted;
+      }
+    } catch {
+      // Deterministic truncation below keeps publishing available if AI fails.
     }
   }
 

@@ -216,6 +216,39 @@ describe("scheduled publishing", () => {
     ]);
   });
 
+  it("fits long due scheduled text before Telegram publication", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const aiCalls: unknown[] = [];
+    await db.createPost({
+      bitrixId: 30,
+      status: "scheduled",
+      scheduledAt: new Date("2026-06-04T13:00:00.000Z"),
+      sourceText: "Long scheduled ".repeat(400),
+      photos: [],
+      payloadHash: "hash"
+    });
+
+    const result = await runDuePosts({
+      db,
+      telegram,
+      textFit: {
+        aiFit: async (request) => {
+          aiCalls.push(request);
+          return "AI fitted scheduled text";
+        }
+      },
+      now: new Date("2026-06-04T13:00:00.000Z")
+    });
+
+    expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(aiCalls).toHaveLength(1);
+    expect(telegram.calls[0].input).toMatchObject({
+      text: "AI fitted scheduled text"
+    });
+    expect(db.posts[0].telegramText).toBe("AI fitted scheduled text");
+  });
+
   it("publishes the latest text and photos when a scheduled post is edited before it is due", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();

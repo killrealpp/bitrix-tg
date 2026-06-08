@@ -62,6 +62,51 @@ describe("server", () => {
     await app.close();
   });
 
+  it("fits long webhook text before Telegram publication", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const aiCalls: unknown[] = [];
+    const app = buildApp({
+      db,
+      telegram,
+      textFit: {
+        aiFit: async (request) => {
+          aiCalls.push(request);
+          return "AI fitted Telegram text";
+        }
+      },
+      config: {}
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/bitrix",
+      payload: [
+        {
+          body: {
+            element_id: 17,
+            active: "Y",
+            pub_news_social: "2976",
+            name: "Long ".repeat(1000)
+          }
+        }
+      ]
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      processed: 1,
+      published: 1
+    });
+    expect(aiCalls).toHaveLength(1);
+    expect(telegram.calls[0].input).toMatchObject({
+      text: "AI fitted Telegram text"
+    });
+    expect(db.posts[0].telegramText).toBe("AI fitted Telegram text");
+    await app.close();
+  });
+
   it("passes the configured photo resolver through the webhook route", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();

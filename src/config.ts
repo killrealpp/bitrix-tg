@@ -51,6 +51,12 @@ const EnvSchema = z.object({
   ),
   OPENAI_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
+  OPENROUTER_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  OPENROUTER_MODEL: z.preprocess(emptyToUndefined, z.string().optional()),
+  OPENROUTER_API_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+  OPENROUTER_SITE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  OPENROUTER_APP_TITLE: z.string().default("bitrix-tg"),
+  OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   WEBHOOK_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
   BITRIX_ACTIVE_FROM_FIELD: z.preprocess(emptyToUndefined, z.string().optional()),
   BITRIX_REQUIRE_EXACT_ACTIVE_FROM: booleanFromEnv(true),
@@ -103,6 +109,8 @@ export function loadConfig(
       : parsed.TELEGRAM_PARSE_MODE === "html"
         ? "HTML"
         : "MarkdownV2";
+  const openRouterModel =
+    parsed.OPENROUTER_MODEL ?? normalizeOpenRouterModel(parsed.OPENAI_MODEL);
 
   return {
     port: parsed.PORT,
@@ -118,6 +126,12 @@ export function loadConfig(
     telegramMessageThreadId: parsed.TELEGRAM_MESSAGE_THREAD_ID,
     openAiApiKey: parsed.OPENAI_API_KEY,
     openAiModel: parsed.OPENAI_MODEL,
+    openRouterApiKey: parsed.OPENROUTER_API_KEY ?? parsed.OPENAI_API_KEY,
+    openRouterModel,
+    openRouterApiBaseUrl: parsed.OPENROUTER_API_BASE_URL,
+    openRouterSiteUrl: parsed.OPENROUTER_SITE_URL,
+    openRouterAppTitle: parsed.OPENROUTER_APP_TITLE,
+    openRouterTimeoutMs: parsed.OPENROUTER_TIMEOUT_MS,
     webhookSecret: parsed.WEBHOOK_SECRET,
     bitrixActiveFromField: parsed.BITRIX_ACTIVE_FROM_FIELD,
     bitrixRequireExactActiveFrom: parsed.BITRIX_REQUIRE_EXACT_ACTIVE_FROM,
@@ -130,4 +144,21 @@ export function loadConfig(
     telegramRetryAttempts: parsed.TELEGRAM_RETRY_ATTEMPTS,
     telegramRetryDelayMs: parsed.TELEGRAM_RETRY_DELAY_MS
   };
+}
+
+function normalizeOpenRouterModel(model: string): string {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return "openai/gpt-4.1-mini";
+  }
+
+  if (trimmed.includes("/")) {
+    return trimmed;
+  }
+
+  if (/^gpt-/i.test(trimmed) || /^o\d/i.test(trimmed)) {
+    return `openai/${trimmed}`;
+  }
+
+  return trimmed;
 }
