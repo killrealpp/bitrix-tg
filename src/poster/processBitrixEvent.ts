@@ -491,6 +491,11 @@ async function editExistingEvent(
   }
 
   if (existing.publicationKind === "text" && event.photos.length > 0) {
+    const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
+    if (mediaSyncPolicy === "rebuild") {
+      return rebuildExistingEvent(event, deps, sourceText, existing);
+    }
+
     const extraMessages = await publishExtraPhotos(event.photos, deps.telegram);
     await deps.db.appendTelegramMessages(
       existing.id,
@@ -535,6 +540,15 @@ async function editMixedEvent(
     throw new Error("Existing mixed post has no Telegram text message reference");
   }
 
+  const storedMessages = await deps.db.listTelegramMessages(existing.id);
+  const textMessages = storedMessages.filter((message) => message.role === "text");
+  const extraMessages = storedMessages.filter((message) => message.role !== "text");
+  const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
+  const photosChanged = !photosEqual(existing.photos, event.photos);
+  if (photosChanged && mediaSyncPolicy === "rebuild") {
+    return rebuildExistingEvent(event, deps, sourceText, existing);
+  }
+
   const telegramText = await fitForTelegramText(sourceText, deps.textFit);
   const editedMessageIds: number[] = [];
 
@@ -547,15 +561,8 @@ async function editMixedEvent(
     editedMessageIds.push(editedText.messageId);
   }
 
-  const storedMessages = await deps.db.listTelegramMessages(existing.id);
-  const textMessages = storedMessages.filter((message) => message.role === "text");
-  const extraMessages = storedMessages.filter((message) => message.role !== "text");
-  const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
-  const photosChanged = !photosEqual(existing.photos, event.photos);
   const syncedPhotos =
-    photosChanged && mediaSyncPolicy === "rebuild"
-      ? await rebuildExtraPhotos(event.photos, deps.telegram, extraMessages)
-      : await syncExtraPhotosSoft(event.photos, deps.telegram, extraMessages);
+    await syncExtraPhotosSoft(event.photos, deps.telegram, extraMessages);
 
   if (mediaSyncPolicy === "rebuild" || syncedPhotos.replaceExisting) {
     await deps.db.replaceTelegramMessages(existing.id, [
@@ -605,7 +612,7 @@ async function editMediaEvent(
   const photosChanged = !photosEqual(existing.photos, event.photos);
   const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
   if (mediaSyncPolicy === "rebuild" && photosChanged) {
-    return rebuildMediaEvent(event, deps, sourceText, existing);
+    return rebuildExistingEvent(event, deps, sourceText, existing);
   }
 
   const telegramText = await fitForTelegramCaption(sourceText, deps.textFit);
@@ -684,14 +691,14 @@ async function editMediaEvent(
   };
 }
 
-async function rebuildMediaEvent(
+async function rebuildExistingEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
   existing: StoredBitrixPost
 ): Promise<ProcessResult> {
-  const storedMessages = await deps.db.listTelegramMessages(existing.id);
-  for (const message of storedMessages) {
+  const messagesToDelete = await listMessagesToDelete(deps.db, existing);
+  for (const message of messagesToDelete) {
     await deps.telegram.deleteMessage({
       chatId: message.chatId,
       messageId: message.tgMessageId
@@ -723,6 +730,27 @@ async function rebuildMediaEvent(
     bitrixId: event.bitrixId,
     messageIds: published.messages.map((message) => message.messageId)
   };
+}
+
+async function listMessagesToDelete(
+  db: DbGateway,
+  existing: StoredBitrixPost
+): Promise<Array<Pick<StoredTelegramMessage, "chatId" | "tgMessageId">>> {
+  const storedMessages = await db.listTelegramMessages(existing.id);
+  if (storedMessages.length > 0) {
+    return storedMessages;
+  }
+
+  if (!existing.chatId || !existing.mainMessageId) {
+    return [];
+  }
+
+  return [
+    {
+      chatId: existing.chatId,
+      tgMessageId: existing.mainMessageId
+    }
+  ];
 }
 
 async function publishByPhotoCount(
@@ -834,28 +862,6 @@ async function syncExtraPhotosSoft(
     messageIds: [...messageIds, ...messages.map((message) => message.messageId)],
     retainedMessages,
     replaceExisting
-  };
-}
-
-async function rebuildExtraPhotos(
-  photos: ParsedBitrixEvent["photos"],
-  telegram: TelegramClient,
-  existingMessages: StoredTelegramMessage[]
-): Promise<PhotoSyncResult> {
-  for (const message of existingMessages) {
-    await telegram.deleteMessage({
-      chatId: message.chatId,
-      messageId: message.tgMessageId
-    });
-  }
-
-  const messages = await publishExtraPhotos(photos, telegram);
-
-  return {
-    messages,
-    messageIds: messages.map((message) => message.messageId),
-    retainedMessages: [],
-    replaceExisting: true
   };
 }
 

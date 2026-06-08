@@ -88,3 +88,14 @@ notifies the admin when `TELEGRAM_ADMIN_CHAT_ID` is configured.
 The server logs non-empty scheduler runs as `Scheduled publishing worker result`
 with `{ checked, published, failed }`, so `journalctl -u bitrix-tg -f` shows
 whether the queue actually picked up due posts.
+
+## 2026-06-08 / Multiple Due Posts
+
+The scheduler reads due rows with `findDueScheduledPosts(now, limit)` and
+publishes each row in that result set. The default worker limit remains 25 per
+run, so one scheduled post waiting in the queue does not block other due posts
+from being published in the same pass.
+
+Regression coverage verifies two different Bitrix elements scheduled for the
+same timestamp: the worker returns `{ checked: 2, published: 2, failed: 0 }`
+and sends both the text post and the media group.

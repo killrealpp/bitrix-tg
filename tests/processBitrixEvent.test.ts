@@ -608,7 +608,11 @@ describe("processBitrixEvent", () => {
     });
 
     await processBitrixEvent(first, { db, telegram });
-    const result = await processBitrixEvent(second, { db, telegram });
+    const result = await processBitrixEvent(second, {
+      db,
+      telegram,
+      mediaSyncPolicy: "soft"
+    });
 
     expect(result.status).toBe("edited");
     expect(telegram.calls.map((call) => call.method)).toEqual([
@@ -620,6 +624,50 @@ describe("processBitrixEvent", () => {
       "text",
       "extra_photo",
       "extra_photo"
+    ]);
+  });
+
+  it("rebuild policy replaces a text post with a media group when photos are added", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 36,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Text becomes album"
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 36,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Text becomes album",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    const result = await processBitrixEvent(second, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendText",
+      "deleteMessage",
+      "sendMediaGroup"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.posts[0].mainMessageId).toBe(101);
+    expect(db.messages.map((message) => message.role)).toEqual([
+      "album_item",
+      "album_item"
+    ]);
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/upload/2026-01-15 19.47.41.jpg",
+      "https://example.com/upload/album photo 2.jpg"
     ]);
   });
 
@@ -1089,6 +1137,127 @@ describe("processBitrixEvent", () => {
     ]);
   });
 
+  it("rebuild policy replaces an old mixed post with the current media group when photos change", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 37,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Old soft mixed"
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 37,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Old soft mixed",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/old-extra.jpg"
+          }
+        }
+      }
+    });
+    const [third] = parseBitrixWebhook({
+      body: {
+        element_id: 37,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Old soft mixed updated",
+        all_properties: {
+          PHOTOS: [
+            { url: "https://example.com/new-a.jpg" },
+            { url: "https://example.com/new-b.jpg" }
+          ]
+        }
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    await processBitrixEvent(second, {
+      db,
+      telegram,
+      mediaSyncPolicy: "soft"
+    });
+    const result = await processBitrixEvent(third, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendText",
+      "sendPhoto",
+      "deleteMessage",
+      "deleteMessage",
+      "sendMediaGroup"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("media_group");
+    expect(db.posts[0].telegramText).toBe("Old soft mixed updated");
+    expect(db.messages.map((message) => message.role)).toEqual([
+      "album_item",
+      "album_item"
+    ]);
+    expect(db.messages.map((message) => message.mediaUrl)).toEqual([
+      "https://example.com/new-a.jpg",
+      "https://example.com/new-b.jpg"
+    ]);
+  });
+
+  it("rebuild policy replaces an old mixed post with text when photos are removed", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const [first] = parseBitrixWebhook({
+      body: {
+        element_id: 38,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Mixed cleanup"
+      }
+    });
+    const [second] = parseBitrixWebhook({
+      body: {
+        element_id: 38,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Mixed cleanup",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/old-extra.jpg"
+          }
+        }
+      }
+    });
+    const [third] = parseBitrixWebhook({
+      body: {
+        element_id: 38,
+        active: "Y",
+        pub_news_social: "2976",
+        name: "Mixed cleanup no photos"
+      }
+    });
+
+    await processBitrixEvent(first, { db, telegram });
+    await processBitrixEvent(second, {
+      db,
+      telegram,
+      mediaSyncPolicy: "soft"
+    });
+    const result = await processBitrixEvent(third, { db, telegram });
+
+    expect(result.status).toBe("edited");
+    expect(telegram.calls.map((call) => call.method)).toEqual([
+      "sendText",
+      "sendPhoto",
+      "deleteMessage",
+      "deleteMessage",
+      "sendText"
+    ]);
+    expect(db.posts[0].publicationKind).toBe("text");
+    expect(db.posts[0].telegramText).toBe("Mixed cleanup no photos");
+    expect(db.messages.map((message) => message.role)).toEqual(["text"]);
+  });
+
   it("fails active social posts with unresolved Bitrix photo ids instead of publishing text-only", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
@@ -1200,8 +1369,16 @@ describe("processBitrixEvent", () => {
     });
 
     await processBitrixEvent(first, { db, telegram });
-    await processBitrixEvent(second, { db, telegram });
-    const result = await processBitrixEvent(third, { db, telegram });
+    await processBitrixEvent(second, {
+      db,
+      telegram,
+      mediaSyncPolicy: "soft"
+    });
+    const result = await processBitrixEvent(third, {
+      db,
+      telegram,
+      mediaSyncPolicy: "soft"
+    });
 
     expect(result.status).toBe("edited");
     expect(telegram.calls.map((call) => call.method)).toEqual([

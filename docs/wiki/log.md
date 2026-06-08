@@ -106,3 +106,18 @@ passed 97 tests in 10 files, `npm run build` passed, and a real local Telegram
 E2E passed with two local URL photos containing spaces: scheduled store,
 upload-first `sendMediaGroup`, album caption edit, photo-removal rebuild to
 text, and inactive cleanup deletion all succeeded without printing secrets.
+
+## [2026-06-08 11:15+03:00] milestone | Rebuild media sync for text/mixed edits
+
+Production `rebuild` media sync now applies to text and old mixed posts too.
+When a Bitrix element gains photos after a text-only Telegram publication, or an
+old mixed text-plus-extra-photo publication changes/removes photos, the service
+deletes every Telegram message stored for that Bitrix element and republishes
+the current canonical state (`sendMessage`, `sendPhoto`, or `sendMediaGroup`).
+This avoids the previous soft-style symptom where removed photos stayed visible
+and added photos appeared as separate extra messages.
+
+Regression coverage now includes text->media_group, mixed->media_group,
+mixed->text, the existing soft behavior when explicitly configured, and multiple
+due scheduled posts being published in one worker run. Verification:
+`npm test` passed 111 tests in 10 files and `npm run build` passed.

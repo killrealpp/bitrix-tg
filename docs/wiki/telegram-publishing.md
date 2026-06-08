@@ -116,3 +116,21 @@ Supported modes:
 If photos still fail under `upload`, the next suspects are service-host network
 access to the image URL, invalid/empty image responses, Telegram size/type
 limits, or unresolved Bitrix file ids without URLs.
+
+## 2026-06-08 / Rebuild Media Sync For Production
+
+Telegram cannot append a new item into an existing published media group as the
+same album. For production visual consistency the default
+`TELEGRAM_MEDIA_SYNC_POLICY=rebuild` treats any photo-list change as a full
+sync for that Bitrix element: delete all stored Telegram messages for the
+element, then publish the current Bitrix state again.
+
+This applies to media posts, text posts that later gain photos, and old
+`mixed` posts created by the explicit `soft` mode. The resulting Telegram shape
+is canonical again: no photos means `sendMessage`, one photo means `sendPhoto`,
+and multiple photos means `sendMediaGroup`.
+
+If removed photos stay in Telegram or newly added photos appear as separate
+extra messages, the VPS is probably running with
+`TELEGRAM_MEDIA_SYNC_POLICY=soft`, an old build, or stale database rows created
+before deploying the rebuild fix.
