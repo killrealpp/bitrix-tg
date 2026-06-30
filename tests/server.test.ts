@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { LOG_REDACT_PATHS, buildApp } from "../src/server";
 import { runDuePosts } from "../src/scheduler/runDuePosts";
 import {
@@ -60,6 +63,53 @@ describe("server", () => {
       ignored: 0
     });
     await app.close();
+  });
+
+  it("can save the latest incoming webhook body to a debug file", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "bitrix-tg-webhook-"));
+    const dumpPath = path.join(dir, "last-bitrix-webhook.json");
+    const app = buildApp({
+      db: new FakeDbGateway(),
+      telegram: new FakeTelegramClient(),
+      config: {
+        debugSaveIncomingWebhook: true,
+        debugWebhookDumpPath: dumpPath
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/bitrix",
+      payload: [
+        {
+          body: {
+            element_id: 91,
+            active: "Y",
+            publish_social: "Y",
+            publish_targets: {
+              telegram: "Y",
+              vk: "N",
+              max: "N"
+            },
+            post_type: "Акция",
+            name: "Debug dump"
+          }
+        }
+      ]
+    });
+
+    expect(response.statusCode).toBe(200);
+    const dump = JSON.parse(readFileSync(dumpPath, "utf8"));
+    expect(dump.body[0].body).toMatchObject({
+      element_id: 91,
+      post_type: "Акция",
+      publish_targets: {
+        telegram: "Y"
+      }
+    });
+
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("fits long webhook text before Telegram publication", async () => {

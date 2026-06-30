@@ -87,6 +87,16 @@ describe("loadConfig", () => {
     );
   });
 
+  it("loads incoming webhook debug dump settings from env", () => {
+    const config = loadConfig({
+      DEBUG_SAVE_INCOMING_WEBHOOK: "true",
+      DEBUG_WEBHOOK_DUMP_PATH: "./data/debug/custom-webhook.json"
+    });
+
+    expect(config.debugSaveIncomingWebhook).toBe(true);
+    expect(config.debugWebhookDumpPath).toBe("./data/debug/custom-webhook.json");
+  });
+
   it("loads OpenRouter text fitting settings from env", () => {
     const config = loadConfig({
       OPENROUTER_API_KEY: "openrouter-secret",
@@ -137,5 +147,9 @@ describe("loadConfig", () => {
     expect(example).toContain("TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS=15000");
     expect(example).toContain("OPENROUTER_API_KEY=");
     expect(example).toContain("OPENROUTER_MODEL=openai/gpt-4.1-mini");
+    expect(example).toContain("DEBUG_SAVE_INCOMING_WEBHOOK=false");
+    expect(example).toContain(
+      "DEBUG_WEBHOOK_DUMP_PATH=./data/debug/last-bitrix-webhook.json"
+    );
   });
 });

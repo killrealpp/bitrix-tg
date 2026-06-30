@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
@@ -23,6 +24,7 @@ import { runDuePosts } from "./scheduler/runDuePosts";
 import { redactErrorForLog, redactSensitiveText } from "./security/redaction";
 import type { TextFitOptions } from "./text/fitText";
 import { createOpenRouterTextFit } from "./text/openRouterTextFit";
+import { shouldUseAiPrompt } from "./text/socialText";
 import { MaxClient } from "./social/maxClient";
 import type { ExternalSocialPublisher, ExternalSocialTarget } from "./social/types";
 import { VkClient } from "./social/vkClient";
@@ -54,6 +56,8 @@ export interface BuildAppDeps {
       | "maxToken"
       | "vkToken"
       | "vkAccessToken"
+      | "debugSaveIncomingWebhook"
+      | "debugWebhookDumpPath"
     >
   >;
   textFit?: TextFitOptions;
@@ -109,6 +113,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
     }
 
     try {
+      await saveIncomingWebhookDebugDump(request.body, deps.config, app);
       const events = parseBitrixWebhook(request.body, {
         activeFromField: deps.config.bitrixActiveFromField,
         activeFromUtcOffsetMinutes: deps.config.bitrixLocalUtcOffsetMinutes
@@ -131,7 +136,13 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
           })
         );
       }
-      logProcessingResults(app, events, results, logSecrets);
+      logProcessingResults(
+        app,
+        events,
+        results,
+        logSecrets,
+        Boolean(deps.textFit?.aiPrepare)
+      );
 
       return {
         ok: true,
@@ -160,22 +171,41 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
   return app;
 }
 
+async function saveIncomingWebhookDebugDump(
+  body: unknown,
+  config: BuildAppDeps["config"],
+  app: FastifyInstance
+): Promise<void> {
+  if (!config.debugSaveIncomingWebhook) {
+    return;
+  }
+
+  const dumpPath =
+    config.debugWebhookDumpPath ?? "./data/debug/last-bitrix-webhook.json";
+  const resolvedPath = path.resolve(process.cwd(), dumpPath);
+  const payload = {
+    receivedAt: new Date().toISOString(),
+    body
+  };
+
+  try {
+    await mkdir(path.dirname(resolvedPath), { recursive: true });
+    await writeFile(
+      resolvedPath,
+      `${JSON.stringify(payload, null, 2)}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    app.log.warn(
+      { err: redactErrorForLog(error, []) },
+      "Failed to write incoming webhook debug dump"
+    );
+  }
+}
+
 function logParsedEvents(
   app: FastifyInstance,
-  events: Array<{
-    bitrixId: number;
-    isActive: boolean;
-    activeRaw: string;
-    scheduledAt: Date | null;
-    scheduledAtSourceField: string | null;
-    scheduledAtRawValue: string | null;
-    scheduledAtPrecision: string | null;
-    photos: Array<{
-      id?: string;
-      url?: string;
-      unresolved?: boolean;
-    }>;
-  }>
+  events: ParsedBitrixEvent[]
 ): void {
   for (const event of events) {
     app.log.info(
@@ -183,6 +213,11 @@ function logParsedEvents(
         bitrixId: event.bitrixId,
         isActive: event.isActive,
         activeRaw: event.activeRaw,
+        publishSocial: event.publishSocial,
+        publishTargets: event.publishTargets,
+        postType: event.postType,
+        postTypeRaw: event.postTypeRaw,
+        aiPromptEligible: shouldUseAiPrompt(event.postType),
         scheduledAt: event.scheduledAt?.toISOString() ?? null,
         scheduledAtSourceField: event.scheduledAtSourceField,
         scheduledAtRawValue: event.scheduledAtRawValue,
@@ -208,7 +243,8 @@ function logProcessingResults(
   app: FastifyInstance,
   events: ParsedBitrixEvent[],
   results: ProcessResult[],
-  logSecrets: string[]
+  logSecrets: string[],
+  aiProviderConfigured: boolean
 ): void {
   results.forEach((result, index) => {
     const event = events[index];
@@ -220,6 +256,17 @@ function logProcessingResults(
       error: result.error
         ? redactSensitiveText(result.error, logSecrets)
         : undefined,
+      publishSocial: event?.publishSocial,
+      publishTargets: event?.publishTargets,
+      postType: event?.postType,
+      postTypeRaw: event?.postTypeRaw,
+      aiPromptEligible: event ? shouldUseAiPrompt(event.postType) : undefined,
+      aiProviderConfigured,
+      aiPromptExpected:
+        event &&
+        aiProviderConfigured &&
+        shouldUseAiPrompt(event.postType) &&
+        !["ignored", "deleted", "unchanged", "failed"].includes(result.status),
       photoCount: event?.photos.length,
       photoUrlCount: event?.photos.filter((photo) => Boolean(photo.url)).length,
       unresolvedPhotoCount: event?.photos.filter((photo) => photo.unresolved)

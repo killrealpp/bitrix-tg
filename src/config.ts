@@ -79,7 +79,11 @@ const EnvSchema = z.object({
   VK_ACCESS_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
   VK_GROUP_ID: z.preprocess(emptyToUndefined, z.string().optional()),
   VK_API_VERSION: z.string().default("5.199"),
-  VK_POST_AS_GROUP: booleanFromEnv(true)
+  VK_POST_AS_GROUP: booleanFromEnv(true),
+  DEBUG_SAVE_INCOMING_WEBHOOK: booleanFromEnv(false),
+  DEBUG_WEBHOOK_DUMP_PATH: z
+    .string()
+    .default("./data/debug/last-bitrix-webhook.json")
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;
@@ -158,7 +162,9 @@ export function loadConfig(
     vkAccessToken: parsed.VK_ACCESS_TOKEN,
     vkGroupId: parsed.VK_GROUP_ID,
     vkApiVersion: parsed.VK_API_VERSION,
-    vkPostAsGroup: parsed.VK_POST_AS_GROUP
+    vkPostAsGroup: parsed.VK_POST_AS_GROUP,
+    debugSaveIncomingWebhook: parsed.DEBUG_SAVE_INCOMING_WEBHOOK,
+    debugWebhookDumpPath: parsed.DEBUG_WEBHOOK_DUMP_PATH
   };
 }
 
