@@ -310,6 +310,8 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
     "TELEGRAM_PUBLISH",
     "pub_news_telegram",
     "PUB_NEWS_TELEGRAM",
+    "pub_news_tg",
+    "PUB_NEWS_TG",
     "publish_to_telegram",
     "PUBLISH_TO_TELEGRAM",
     "all_properties.publish_telegram",
@@ -318,10 +320,14 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
     "all_properties.TELEGRAM_PUBLISH",
     "all_properties.pub_news_telegram",
     "all_properties.PUB_NEWS_TELEGRAM",
+    "all_properties.pub_news_tg",
+    "all_properties.PUB_NEWS_TG",
     "properties.publish_telegram",
     "properties.PUBLISH_TELEGRAM",
     "properties.pub_news_telegram",
-    "properties.PUB_NEWS_TELEGRAM"
+    "properties.PUB_NEWS_TELEGRAM",
+    "properties.pub_news_tg",
+    "properties.PUB_NEWS_TG"
   ]);
   const vk = readFirstValue(body, [
     "publish_vk",
@@ -330,6 +336,8 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
     "VK_PUBLISH",
     "pub_news_vk",
     "PUB_NEWS_VK",
+    "pub_news_vkpost",
+    "PUB_NEWS_VKPOST",
     "publish_to_vk",
     "PUBLISH_TO_VK",
     "publish_vkontakte",
@@ -340,12 +348,16 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
     "all_properties.VK_PUBLISH",
     "all_properties.pub_news_vk",
     "all_properties.PUB_NEWS_VK",
+    "all_properties.pub_news_vkpost",
+    "all_properties.PUB_NEWS_VKPOST",
     "all_properties.publish_vkontakte",
     "all_properties.PUBLISH_VKONTAKTE",
     "properties.publish_vk",
     "properties.PUBLISH_VK",
     "properties.pub_news_vk",
-    "properties.PUB_NEWS_VK"
+    "properties.PUB_NEWS_VK",
+    "properties.pub_news_vkpost",
+    "properties.PUB_NEWS_VKPOST"
   ]);
   const max = readFirstValue(body, [
     "publish_max",

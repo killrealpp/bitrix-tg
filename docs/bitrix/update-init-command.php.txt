@@ -1,3 +1,16 @@
+$file = $_SERVER['DOCUMENT_ROOT'] . '/local/php_interface/init.php';
+$debugFile = $_SERVER['DOCUMENT_ROOT'] . '/local/bitrix_tg_last_payload.json';
+$dir = dirname($file);
+
+if (!is_dir($dir)) {
+    mkdir($dir, 0775, true);
+}
+
+if (file_exists($file)) {
+    copy($file, $file . '.bak-' . date('Ymd-His'));
+}
+
+$newContent = <<<'BITRIX_TG_INIT'
 <?php
 if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) {
     return;
@@ -503,3 +516,23 @@ function bitrixTgSubstr(string $value, int $start, int $length): string
         ? mb_substr($value, $start, $length, "UTF-8")
         : substr($value, $start, $length);
 }
+BITRIX_TG_INIT;
+
+$bytes = file_put_contents($file, $newContent, LOCK_EX);
+
+if ($bytes === false) {
+    echo "ERROR: cannot write /local/php_interface/init.php\n";
+    return;
+}
+
+if (file_exists($debugFile)) {
+    unlink($debugFile);
+}
+
+clearstatcache(true, $file);
+
+echo "OK: /local/php_interface/init.php updated\n";
+echo "Bytes: " . filesize($file) . "\n";
+echo "Backup: /local/php_interface/init.php.bak-YYYYMMDD-HHMMSS if old file existed\n";
+echo "Removed debug JSON: /local/bitrix_tg_last_payload.json if it existed\n";
+echo "Next expected payload fields: section_name, section_code, post_type from Bitrix section fallback\n";

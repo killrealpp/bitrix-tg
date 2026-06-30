@@ -149,6 +149,9 @@ the JSON body:
     "max": true
   },
   "post_type": "company_news",
+  "section_id": 123,
+  "section_name": "Events",
+  "section_code": "events",
   "property_meta": [
     {
       "id": "123",
@@ -171,10 +174,17 @@ are ignored.
 - `entertainment`
 - `unknown`
 
+If Bitrix does not have a dedicated social post type property, `init.php`
+should send the element section fields and use `section_name` as the fallback
+`post_type`. For example, a section named `События` is normalized to `event`.
+`iblock_name` is the infoblock name and should not be used as the section/type
+signal.
+
 The parser still accepts legacy/fallback aliases in `all_properties`, including
-`pub_news_social`, `publish_telegram`, `publish_vk`, `publish_max`, and
-`social_post_type`. `property_meta` is diagnostic: it helps confirm the real
-Bitrix property codes/names without exposing secrets.
+`pub_news_social`, `publish_telegram`, `pub_news_tg`, `publish_vk`,
+`pub_news_vkpost`, `publish_max`, `social_post_type`, and `section_name`.
+`property_meta` is diagnostic: it helps confirm the real Bitrix property
+codes/names without exposing secrets.
 
 The recommended `init.php` reference implementation is stored in
 `docs/bitrix/init.php`.

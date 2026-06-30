@@ -156,3 +156,20 @@ all selected targets together.
 
 Verification: `npm run build` passed and `npm test` passed 145 tests in 14
 files.
+
+## [2026-06-30 17:45+03:00] milestone | Bitrix section fallback for post type
+
+Production Bitrix payload showed `iblock_name: "Новости"` while the actual
+content section was expected to be `События`. The Bitrix `init.php` template
+now sends `section_id`, `section_name`, `section_code`, and
+`iblock_section_name`, and uses the section name as `post_type` when a dedicated
+post-type property is absent. The parser also accepts the real production target
+property codes `pub_news_tg` and `pub_news_vkpost`.
+
+The public Bitrix debug payload file is disabled in the production template.
+`docs/bitrix/update-init-command.php.txt` is a paste-ready Bitrix PHP command
+that updates `/local/php_interface/init.php`, creates a timestamped backup, and
+removes the old `/local/bitrix_tg_last_payload.json` file if it exists.
+
+Verification: `npm test` passed 148 tests in 14 files and `npm run build`
+passed.

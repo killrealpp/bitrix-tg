@@ -172,6 +172,32 @@ describe("parseBitrixWebhook", () => {
     expect(event.postType).toBe("entertainment");
   });
 
+  it("uses Bitrix section name as the post type fallback and reads production target codes", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: "181840",
+        active: "Y",
+        section_name: "События",
+        all_properties: {
+          pub_news_social: "Да",
+          pub_news_tg: "Да",
+          pub_news_vkpost: "Да",
+          pub_news_max: null
+        },
+        name: "Event from section"
+      }
+    });
+
+    expect(event.publishSocial).toBe(true);
+    expect(event.publishTargets).toEqual({
+      telegram: true,
+      vk: true,
+      max: false
+    });
+    expect(event.postType).toBe("event");
+    expect(event.postTypeRaw).toBe("События");
+  });
+
   it("normalizes Bitrix/PHP uppercase photo objects with SRC fields", () => {
     const [event] = parseBitrixWebhook({
       body: {
