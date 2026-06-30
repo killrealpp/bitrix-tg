@@ -41,6 +41,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-06-05 14:25+03:00) Fixed production scheduling time semantics: Bitrix local date strings without explicit timezone are parsed with `BITRIX_LOCAL_UTC_OFFSET_MINUTES=180`, `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true` blocks active/social posts without an exact time, invalid time values preserve source details for admin notifications, and the scheduler logs non-empty worker results.
 - [x] (2026-06-08 11:15+03:00) Tightened production `rebuild` media sync for text/mixed posts: when photos are added to a text post or changed/removed from an old mixed post, the service deletes all Telegram messages for that Bitrix element and republishes the current text/photo state. Added regression coverage for text->media_group, mixed->media_group, mixed->text, and multiple due scheduled posts in one worker run.
 - [x] (2026-06-08 11:45+03:00) Added OpenRouter-backed AI text fitting: short texts bypass AI, over-limit text/captions call OpenRouter through `OPENROUTER_*` env, legacy `OPENAI_*` env remains a fallback, and AI failure or too-long AI output falls back to deterministic truncation.
+- [x] (2026-06-26 18:40+03:00) Added the multi-social layer for canonical Bitrix fields `publish_social`, `publish_targets`, `post_type`, and `property_meta`; Telegram retains edit/rebuild, VK/MAX publish/delete only, OpenRouter prepares event/promo/company-news posts, SQLite stores per-target `social_publications`, and fake-client coverage verifies Telegram/VK/MAX scheduling, idempotency, target enable/disable, and client photo flows.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -252,6 +253,22 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: The admin destination is now known, but it should remain configuration, not a hardcoded application constant.
   Date/Author: 2026-06-04 / User
 
+- Decision: Make `publish_social` the master switch and `publish_targets` the canonical per-platform selector.
+  Rationale: Bitrix now has one master checkbox plus individual Telegram/VK/MAX checkboxes. The master false state must override all targets so content managers can disable every social publication from one field.
+  Date/Author: 2026-06-26 / User
+
+- Decision: Keep Telegram editable but make VK/MAX publish/delete only for the first multi-social release.
+  Rationale: Telegram edit semantics are already implemented and tested with stored message refs. VK/MAX editing introduces platform-specific constraints and is not required for this release; target-level `social_publications` still prevents duplicates and supports best-effort delete.
+  Date/Author: 2026-06-26 / Codex
+
+- Decision: Use the internal scheduler for VK/MAX even though VK `wall.post` supports `publish_date`.
+  Rationale: One queue keeps SQLite state, retry, admin notifications, and duplicate prevention consistent across Telegram, VK, and MAX.
+  Date/Author: 2026-06-26 / Codex
+
+- Decision: Run SMM prompt preparation for `event`, `promo`, and `company_news`, but skip AI for `entertainment` and `unknown`.
+  Rationale: The user provided separate prompts for the three business post types and explicitly asked not to AI-process entertainment or unknown types beyond formatting/emoji.
+  Date/Author: 2026-06-26 / User
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -281,6 +298,8 @@ Additional verification on 2026-06-05 at 09:15+03:00: `npm test` passed 62 tests
 Additional verification on 2026-06-05 at 09:56+03:00: `npm test` passed 75 tests in 10 files, and `npm run build` passed. New coverage proves that the service defaults to port `18080`, the HTTP Bitrix photo resolver calls `POST { "ids": [...] }`, URL-bearing photo arrays do not call the resolver, raw `PHOTOS: "253902"` can publish after resolver URL mapping, mixed URL/id photo arrays publish as media groups after partial resolution, unresolved resolver results fail without Telegram calls and notify the admin, the webhook route passes the resolver dependency, and the scheduled worker resolves old stored photo ids before publishing. A non-mutating Telegram credentials check also confirmed `getMe` and `getChat` succeed for the current ignored `.env`.
 
 Additional verification on 2026-06-08 at 11:55+03:00: `npm test` passed 119 tests in 11 files, and `npm run build` passed. New coverage proves that short texts bypass AI, over-limit text/captions use the injected text fitter, empty AI responses, AI failures, and over-limit AI responses fall back to deterministic truncation, webhook and scheduled publication store fitted text, OpenRouter requests use the chat-completions contract, and OpenRouter/OpenAI secret-shaped values are redacted from errors.
+
+Additional verification on 2026-06-26 at 18:40+03:00: `npm run build` passed and `npm test` passed 145 tests in 14 files. New coverage proves canonical target parsing and master override, SMM prompt selection, Telegram/VK/MAX scheduled publishing together, duplicate webhook protection across all targets, VK/MAX no-edit/no-duplicate behavior on content change, newly enabled targets publishing once, unchecked/master-disabled targets deleting stored publications, MAX image upload/retry/delete flow, and VK wall photo upload plus group wall posting.
 
 ## Context and Orientation
 
@@ -326,6 +345,11 @@ Use these additional environment variables:
 - `OPENROUTER_APP_TITLE`, defaulting to `bitrix-tg`
 - `OPENROUTER_TIMEOUT_MS`, defaulting to `20000`
 - `OPENAI_API_KEY` and `OPENAI_MODEL` as backward-compatible OpenRouter fallbacks
+- `MAX_TOKEN`, `MAX_CHAT_ID`, `MAX_API_BASE_URL`, defaulting to `https://platform-api2.max.ru`
+- optional local MAX TLS helper `NODE_EXTRA_CA_CERTS=./data/certs/russian_trusted_ca_bundle.pem`
+- `VK_TOKEN` as the community token for `wall.post`/`wall.delete`
+- `VK_ACCESS_TOKEN` as the user token for `photos.getWallUploadServer`/`photos.saveWallPhoto`
+- `VK_GROUP_ID`, `VK_API_VERSION`, defaulting to `5.199`, and `VK_POST_AS_GROUP`, defaulting to `true`
 - `WEBHOOK_SECRET`, if webhook authentication is enabled
 - `PORT`, defaulting to `18080`
 

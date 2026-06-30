@@ -135,3 +135,24 @@ If OpenRouter fails, returns empty text, or returns text that still exceeds
 Telegram limits, the publication continues with deterministic truncation.
 Verification: `npm test` passed 119 tests in 11 files and `npm run build`
 passed.
+
+## [2026-06-26 18:40+03:00] milestone | Telegram + VK + MAX multi-social layer
+
+The service now accepts canonical Bitrix fields `publish_social`,
+`publish_targets`, `post_type`, and diagnostic `property_meta`. The master
+social checkbox controls all targets. Telegram keeps edit/rebuild behavior,
+while VK and MAX are publish/delete only for the first multi-social release.
+
+OpenRouter now has SMM preparation prompts for `event`, `promo`, and
+`company_news` posts with a 1000-character target. `entertainment` and
+`unknown` posts skip AI and use deterministic formatting. The database has a new
+`social_publications` table for target-level state and new `bitrix_posts` fields
+for `post_type`, selected targets, and prepared text.
+
+MAX publishing uploads images through `/uploads?type=image` and sends them as
+message attachments. VK publishing uploads wall photos with `VK_ACCESS_TOKEN`
+and posts to the group wall with `VK_TOKEN`. The internal scheduler publishes
+all selected targets together.
+
+Verification: `npm run build` passed and `npm test` passed 145 tests in 14
+files.

@@ -99,3 +99,17 @@ from being published in the same pass.
 Regression coverage verifies two different Bitrix elements scheduled for the
 same timestamp: the worker returns `{ checked: 2, published: 2, failed: 0 }`
 and sends both the text post and the media group.
+
+## 2026-06-26 / Multi-Social Scheduling
+
+The same internal scheduler is used for Telegram, VK, and MAX. VK supports a
+native `publish_date` parameter in `wall.post`, but the release uses the service
+queue for every platform so publication state, retry policy, admin
+notifications, and SQLite recovery stay identical.
+
+When a future Bitrix post is due, the worker publishes every selected target
+that has not already been successfully published. Telegram stores exact message
+refs in `telegram_messages`; VK/MAX store one row each in `social_publications`.
+
+If a target client is missing from env at due time, the worker treats that row as
+a scheduled publication failure and applies the normal retry/final-failure path.

@@ -23,6 +23,9 @@ import { runDuePosts } from "./scheduler/runDuePosts";
 import { redactErrorForLog, redactSensitiveText } from "./security/redaction";
 import type { TextFitOptions } from "./text/fitText";
 import { createOpenRouterTextFit } from "./text/openRouterTextFit";
+import { MaxClient } from "./social/maxClient";
+import type { ExternalSocialPublisher, ExternalSocialTarget } from "./social/types";
+import { VkClient } from "./social/vkClient";
 import {
   TelegramBotApiClient,
   type TelegramClient
@@ -32,6 +35,7 @@ import { TelegramScheduledFailureAdminNotifier } from "./telegram/adminNotifier"
 export interface BuildAppDeps {
   db: DbGateway;
   telegram: TelegramClient;
+  externalPublishers?: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>>;
   adminNotifier?: MissingScheduleTimeAdminNotifier;
   photoResolver?: BitrixPhotoResolver;
   config: Partial<
@@ -47,6 +51,9 @@ export interface BuildAppDeps {
       | "telegramMediaSyncPolicy"
       | "openAiApiKey"
       | "openRouterApiKey"
+      | "maxToken"
+      | "vkToken"
+      | "vkAccessToken"
     >
   >;
   textFit?: TextFitOptions;
@@ -114,6 +121,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
           await processBitrixEvent(event, {
             db: deps.db,
             telegram: deps.telegram,
+            externalPublishers: deps.externalPublishers,
             adminNotifier: deps.adminNotifier,
             photoResolver: deps.photoResolver,
             textFit: deps.textFit,
@@ -304,6 +312,7 @@ export async function startServer(): Promise<void> {
   const adminNotifier = adminTelegram
     ? new TelegramScheduledFailureAdminNotifier(adminTelegram)
     : undefined;
+  const externalPublishers = buildExternalPublishers(config);
   const photoResolver = config.bitrixFileResolverUrl
     ? new HttpBitrixPhotoResolver({
         endpointUrl: config.bitrixFileResolverUrl
@@ -322,6 +331,7 @@ export async function startServer(): Promise<void> {
   const app = buildApp({
     db,
     telegram,
+    externalPublishers,
     adminNotifier,
     photoResolver,
     textFit,
@@ -333,6 +343,7 @@ export async function startServer(): Promise<void> {
       const result = await runDuePosts({
         db,
         telegram,
+        externalPublishers,
         adminNotifier,
         photoResolver,
         textFit
@@ -367,7 +378,10 @@ if (require.main === module) {
         process.env.TELEGRAM_BOT_TOKEN,
         process.env.WEBHOOK_SECRET,
         process.env.OPENAI_API_KEY,
-        process.env.OPENROUTER_API_KEY
+        process.env.OPENROUTER_API_KEY,
+        process.env.MAX_TOKEN,
+        process.env.VK_TOKEN,
+        process.env.VK_ACCESS_TOKEN
       ])
     );
     process.exit(1);
@@ -379,6 +393,7 @@ function getLogSecrets(
     Pick<
       AppConfig,
       "telegramBotToken" | "webhookSecret" | "openAiApiKey" | "openRouterApiKey"
+      | "maxToken" | "vkToken" | "vkAccessToken"
     >
   >
 ): string[] {
@@ -386,8 +401,39 @@ function getLogSecrets(
     config.telegramBotToken,
     config.webhookSecret,
     config.openAiApiKey,
-    config.openRouterApiKey
+    config.openRouterApiKey,
+    config.maxToken,
+    config.vkToken,
+    config.vkAccessToken
   ].filter(
     (value): value is string => Boolean(value)
   );
+}
+
+function buildExternalPublishers(
+  config: AppConfig
+): Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> {
+  const publishers: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> = {};
+
+  if (config.maxToken && config.maxChatId) {
+    publishers.max = new MaxClient({
+      token: config.maxToken,
+      chatId: config.maxChatId,
+      apiBaseUrl: config.maxApiBaseUrl,
+      photoDownloadTimeoutMs: config.telegramPhotoDownloadTimeoutMs
+    });
+  }
+
+  if (config.vkToken && config.vkGroupId) {
+    publishers.vk = new VkClient({
+      communityToken: config.vkToken,
+      userAccessToken: config.vkAccessToken,
+      groupId: config.vkGroupId,
+      apiVersion: config.vkApiVersion,
+      postAsGroup: config.vkPostAsGroup,
+      photoDownloadTimeoutMs: config.telegramPhotoDownloadTimeoutMs
+    });
+  }
+
+  return publishers;
 }

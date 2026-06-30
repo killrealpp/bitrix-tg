@@ -71,7 +71,15 @@ const EnvSchema = z.object({
     .positive()
     .default(15_000),
   TELEGRAM_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(3),
-  TELEGRAM_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(500)
+  TELEGRAM_RETRY_DELAY_MS: z.coerce.number().int().nonnegative().default(500),
+  MAX_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  MAX_CHAT_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  MAX_API_BASE_URL: z.string().url().default("https://platform-api2.max.ru"),
+  VK_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_ACCESS_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_GROUP_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_API_VERSION: z.string().default("5.199"),
+  VK_POST_AS_GROUP: booleanFromEnv(true)
 });
 
 export type AppConfig = ReturnType<typeof loadConfig>;
@@ -142,7 +150,15 @@ export function loadConfig(
     telegramPhotoDeliveryMode: parsed.TELEGRAM_PHOTO_DELIVERY_MODE,
     telegramPhotoDownloadTimeoutMs: parsed.TELEGRAM_PHOTO_DOWNLOAD_TIMEOUT_MS,
     telegramRetryAttempts: parsed.TELEGRAM_RETRY_ATTEMPTS,
-    telegramRetryDelayMs: parsed.TELEGRAM_RETRY_DELAY_MS
+    telegramRetryDelayMs: parsed.TELEGRAM_RETRY_DELAY_MS,
+    maxToken: parsed.MAX_TOKEN,
+    maxChatId: parsed.MAX_CHAT_ID,
+    maxApiBaseUrl: parsed.MAX_API_BASE_URL,
+    vkToken: parsed.VK_TOKEN,
+    vkAccessToken: parsed.VK_ACCESS_TOKEN,
+    vkGroupId: parsed.VK_GROUP_ID,
+    vkApiVersion: parsed.VK_API_VERSION,
+    vkPostAsGroup: parsed.VK_POST_AS_GROUP
   };
 }
 

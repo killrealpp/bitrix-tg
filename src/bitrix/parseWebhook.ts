@@ -10,6 +10,26 @@ export interface NormalizedPhoto {
 
 export type SocialValue = string | string[];
 export type ScheduledAtPrecision = "date" | "datetime";
+export type PublishTarget = "telegram" | "vk" | "max";
+export type PostType =
+  | "event"
+  | "promo"
+  | "company_news"
+  | "entertainment"
+  | "unknown";
+
+export interface PublishTargets {
+  telegram: boolean;
+  vk: boolean;
+  max: boolean;
+}
+
+export interface PropertyMetaEntry {
+  id?: string;
+  code: string;
+  name?: string;
+  value?: unknown;
+}
 
 export interface ParsedBitrixEvent {
   bitrixId: number;
@@ -17,6 +37,11 @@ export interface ParsedBitrixEvent {
   isActive: boolean;
   activeRaw: string;
   socialValue: SocialValue;
+  publishSocial: boolean;
+  publishTargets: PublishTargets;
+  postType: PostType;
+  postTypeRaw: string;
+  propertyMeta: PropertyMetaEntry[];
   title: string;
   previewText: string;
   detailText: string;
@@ -69,13 +94,47 @@ function parseEnvelope(
   const allProperties = isRecord(body.all_properties) ? body.all_properties : {};
   const socialValue = normalizeSocialValue(
     readFirstValue(body, [
+      "publish_social",
+      "PUBLISH_SOCIAL",
       "pub_news_social",
       "PUB_NEWS_SOCIAL",
+      "properties.publish_social",
+      "properties.PUBLISH_SOCIAL",
       "properties.pub_news_social",
       "properties.PUB_NEWS_SOCIAL",
+      "all_properties.publish_social",
+      "all_properties.PUBLISH_SOCIAL",
       "all_properties.pub_news_social",
       "all_properties.PUB_NEWS_SOCIAL"
     ]) ?? allProperties.pub_news_social
+  );
+  const publishSocial = !isCheckboxValueFalseOrEmpty(socialValue);
+  const publishTargets = publishSocial
+    ? normalizePublishTargets(body)
+    : defaultPublishTargets(false);
+  const postTypeInfo = normalizePostType(
+    readFirstValue(body, [
+      "post_type",
+      "POST_TYPE",
+      "social_post_type",
+      "SOCIAL_POST_TYPE",
+      "content_type",
+      "CONTENT_TYPE",
+      "properties.post_type",
+      "properties.POST_TYPE",
+      "properties.social_post_type",
+      "properties.SOCIAL_POST_TYPE",
+      "all_properties.post_type",
+      "all_properties.POST_TYPE",
+      "all_properties.social_post_type",
+      "all_properties.SOCIAL_POST_TYPE",
+      "all_properties.TYPE",
+      "all_properties.type",
+      "section_name",
+      "SECTION_NAME",
+      "iblock_section_name",
+      "IBLOCK_SECTION_NAME"
+    ])
   );
   const photos = readFirstPhotos(body, [
     "all_properties.PHOTOS",
@@ -116,6 +175,16 @@ function parseEnvelope(
     isActive: activeRaw === "Y",
     activeRaw,
     socialValue,
+    publishSocial,
+    publishTargets,
+    postType: postTypeInfo.postType,
+    postTypeRaw: postTypeInfo.raw,
+    propertyMeta: normalizePropertyMeta(readFirstValue(body, [
+      "property_meta",
+      "PROPERTY_META",
+      "properties_meta",
+      "PROPERTIES_META"
+    ])),
     title: toStringValue(
       readFirstValue(body, ["name", "NAME", "fields.NAME", "FIELDS.NAME"])
     ),
@@ -159,6 +228,9 @@ function parseEnvelope(
       bitrixId: eventWithoutHash.bitrixId,
       activeRaw: eventWithoutHash.activeRaw,
       socialValue: eventWithoutHash.socialValue,
+      publishSocial: eventWithoutHash.publishSocial,
+      publishTargets: eventWithoutHash.publishTargets,
+      postType: eventWithoutHash.postType,
       title: eventWithoutHash.title,
       previewText: eventWithoutHash.previewText,
       detailText: eventWithoutHash.detailText,
@@ -202,6 +274,217 @@ function normalizeSocialValue(value: unknown): SocialValue {
   }
 
   return toStringValue(value).trim();
+}
+
+function normalizePublishTargets(body: Record<string, unknown>): PublishTargets {
+  const explicitTargets = readFirstValue(body, [
+    "publish_targets",
+    "PUBLISH_TARGETS",
+    "targets",
+    "TARGETS",
+    "social_targets",
+    "SOCIAL_TARGETS"
+  ]);
+
+  if (isRecord(explicitTargets)) {
+    return {
+      telegram: checkboxValueToBoolean(
+        readFirstValue(explicitTargets, ["telegram", "TELEGRAM", "tg", "TG"]),
+        false
+      ),
+      vk: checkboxValueToBoolean(
+        readFirstValue(explicitTargets, ["vk", "VK", "vkontakte", "VKONTAKTE"]),
+        false
+      ),
+      max: checkboxValueToBoolean(
+        readFirstValue(explicitTargets, ["max", "MAX"]),
+        false
+      )
+    };
+  }
+
+  const telegram = readFirstValue(body, [
+    "publish_telegram",
+    "PUBLISH_TELEGRAM",
+    "telegram_publish",
+    "TELEGRAM_PUBLISH",
+    "pub_news_telegram",
+    "PUB_NEWS_TELEGRAM",
+    "publish_to_telegram",
+    "PUBLISH_TO_TELEGRAM",
+    "all_properties.publish_telegram",
+    "all_properties.PUBLISH_TELEGRAM",
+    "all_properties.telegram_publish",
+    "all_properties.TELEGRAM_PUBLISH",
+    "all_properties.pub_news_telegram",
+    "all_properties.PUB_NEWS_TELEGRAM",
+    "properties.publish_telegram",
+    "properties.PUBLISH_TELEGRAM",
+    "properties.pub_news_telegram",
+    "properties.PUB_NEWS_TELEGRAM"
+  ]);
+  const vk = readFirstValue(body, [
+    "publish_vk",
+    "PUBLISH_VK",
+    "vk_publish",
+    "VK_PUBLISH",
+    "pub_news_vk",
+    "PUB_NEWS_VK",
+    "publish_to_vk",
+    "PUBLISH_TO_VK",
+    "publish_vkontakte",
+    "PUBLISH_VKONTAKTE",
+    "all_properties.publish_vk",
+    "all_properties.PUBLISH_VK",
+    "all_properties.vk_publish",
+    "all_properties.VK_PUBLISH",
+    "all_properties.pub_news_vk",
+    "all_properties.PUB_NEWS_VK",
+    "all_properties.publish_vkontakte",
+    "all_properties.PUBLISH_VKONTAKTE",
+    "properties.publish_vk",
+    "properties.PUBLISH_VK",
+    "properties.pub_news_vk",
+    "properties.PUB_NEWS_VK"
+  ]);
+  const max = readFirstValue(body, [
+    "publish_max",
+    "PUBLISH_MAX",
+    "max_publish",
+    "MAX_PUBLISH",
+    "pub_news_max",
+    "PUB_NEWS_MAX",
+    "publish_to_max",
+    "PUBLISH_TO_MAX",
+    "all_properties.publish_max",
+    "all_properties.PUBLISH_MAX",
+    "all_properties.max_publish",
+    "all_properties.MAX_PUBLISH",
+    "all_properties.pub_news_max",
+    "all_properties.PUB_NEWS_MAX",
+    "properties.publish_max",
+    "properties.PUBLISH_MAX",
+    "properties.pub_news_max",
+    "properties.PUB_NEWS_MAX"
+  ]);
+
+  return {
+    telegram: checkboxValueToBoolean(telegram, true),
+    vk: checkboxValueToBoolean(vk, false),
+    max: checkboxValueToBoolean(max, false)
+  };
+}
+
+function defaultPublishTargets(value: boolean): PublishTargets {
+  return {
+    telegram: value,
+    vk: value,
+    max: value
+  };
+}
+
+function checkboxValueToBoolean(value: unknown, defaultValue: boolean): boolean {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => checkboxValueToBoolean(item, false));
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  const text = toStringValue(value).trim();
+  if (!text) {
+    return false;
+  }
+
+  const normalized = text.toLowerCase();
+  if (["n", "no", "нет", "false", "0", "off", "unchecked"].includes(normalized)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isCheckboxValueFalseOrEmpty(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.length === 0 || !value.some((item) => checkboxValueToBoolean(item, false));
+  }
+
+  return !checkboxValueToBoolean(value, false);
+}
+
+function normalizePostType(value: unknown): {
+  postType: PostType;
+  raw: string;
+} {
+  const raw = Array.isArray(value)
+    ? value.map((item) => toStringValue(item)).find((item) => item.trim()) ?? ""
+    : toStringValue(value);
+  const normalized = raw.trim().toLowerCase();
+
+  if (!normalized) {
+    return { postType: "unknown", raw: "" };
+  }
+
+  if (/(^|\s|_|-)(event|events|событи|мероприят)/i.test(normalized)) {
+    return { postType: "event", raw };
+  }
+
+  if (/(^|\s|_|-)(promo|promotion|sale|discount|акци|скидк|распрод)/i.test(normalized)) {
+    return { postType: "promo", raw };
+  }
+
+  if (
+    /company[_\s-]?news|новост[ьи]\s+компан|новост[ьи]\s+магазин|корпоративн/i.test(
+      normalized
+    )
+  ) {
+    return { postType: "company_news", raw };
+  }
+
+  if (/(news|новост)/i.test(normalized)) {
+    return { postType: "company_news", raw };
+  }
+
+  if (/(entertainment|fun|развлекатель|юмор|полезн)/i.test(normalized)) {
+    return { postType: "entertainment", raw };
+  }
+
+  return { postType: "unknown", raw };
+}
+
+function normalizePropertyMeta(value: unknown): PropertyMetaEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    const code = toStringValue(item.code ?? item.CODE).trim();
+    if (!code) {
+      return [];
+    }
+
+    return [
+      {
+        id: optionalString(item.id ?? item.ID),
+        code,
+        name: optionalString(item.name ?? item.NAME),
+        value: item.value ?? item.VALUE
+      }
+    ];
+  });
 }
 
 function normalizePhotos(value: unknown): NormalizedPhoto[] {

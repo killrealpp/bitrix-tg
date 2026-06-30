@@ -53,4 +53,21 @@ export class TelegramScheduledFailureAdminNotifier
       ].join("\n")
     });
   }
+
+  async notifySocialPublicationFailure(input: {
+    bitrixId: number;
+    target: string;
+    error: string;
+    action: "publish" | "delete";
+  }): Promise<void> {
+    await this.telegram.sendText({
+      text: [
+        "Bitrix social publication failed.",
+        `Bitrix element: ${input.bitrixId}`,
+        `Target: ${input.target}`,
+        `Action: ${input.action}`,
+        `Error: ${input.error}`
+      ].join("\n")
+    });
+  }
 }

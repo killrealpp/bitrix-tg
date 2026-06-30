@@ -135,3 +135,38 @@ BITRIX_LOCAL_UTC_OFFSET_MINUTES=180
 `active_from`, date-only values such as `"11.06.2026"`, or invalid date strings
 produce `failed`, skip Telegram publication, and notify the admin when the admin
 chat is configured.
+
+## 2026-06-26 / Multi-Social Publishing Rules
+
+The Bitrix master checkbox is now authoritative. Canonical webhook field:
+`publish_social`. If it is false/empty, the service does not create new posts,
+cancels scheduled rows, and deletes already published targets where stored refs
+and API permissions allow it.
+
+Per-target canonical fields live in `publish_targets`:
+
+```json
+{
+  "publish_targets": {
+    "telegram": true,
+    "vk": true,
+    "max": true
+  }
+}
+```
+
+If a single target checkbox is turned off later, only that target is deleted.
+Other still-selected targets remain published.
+
+Telegram keeps the existing edit/rebuild behavior. VK and MAX are deliberately
+publish/delete only in this release: if content changes after VK/MAX publication,
+the service updates its Bitrix state but does not edit and does not duplicate the
+VK/MAX post. If a target is enabled later and has no saved successful
+publication, it is published exactly once.
+
+Post type controls text preparation:
+
+- `event`, `promo`, `company_news` call OpenRouter with the matching SMM prompt
+  and target a post up to 1000 characters;
+- `entertainment` and `unknown` skip AI and use deterministic formatting;
+- all platform limits are enforced after preparation.

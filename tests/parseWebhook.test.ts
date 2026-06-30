@@ -82,6 +82,96 @@ describe("parseBitrixWebhook", () => {
     ]);
   });
 
+  it("parses canonical master flag, target flags, post type, and property metadata", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: "181710",
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "N"
+        },
+        post_type: "Акция",
+        property_meta: [
+          {
+            id: "9001",
+            code: "PUBLISH_VK",
+            name: "Опубликовать в ВК (пост)",
+            value: "Y"
+          }
+        ],
+        name: "Sale"
+      }
+    });
+
+    expect(event.publishSocial).toBe(true);
+    expect(event.publishTargets).toEqual({
+      telegram: true,
+      vk: true,
+      max: false
+    });
+    expect(event.postType).toBe("promo");
+    expect(event.postTypeRaw).toBe("Акция");
+    expect(event.propertyMeta).toEqual([
+      {
+        id: "9001",
+        code: "PUBLISH_VK",
+        name: "Опубликовать в ВК (пост)",
+        value: "Y"
+      }
+    ]);
+  });
+
+  it("lets the canonical master flag override enabled target flags", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: "181711",
+        active: "Y",
+        publish_social: "N",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "Y"
+        },
+        name: "Disabled social post"
+      }
+    });
+
+    expect(event.publishSocial).toBe(false);
+    expect(event.publishTargets).toEqual({
+      telegram: false,
+      vk: false,
+      max: false
+    });
+  });
+
+  it("reads target aliases from all_properties when canonical targets are absent", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: "181712",
+        active: "Y",
+        all_properties: {
+          pub_news_social: "2976",
+          publish_telegram: "N",
+          publish_vk: "Y",
+          publish_max: "Y",
+          social_post_type: "Развлекательный контент"
+        },
+        name: "Fallback aliases"
+      }
+    });
+
+    expect(event.publishSocial).toBe(true);
+    expect(event.publishTargets).toEqual({
+      telegram: false,
+      vk: true,
+      max: true
+    });
+    expect(event.postType).toBe("entertainment");
+  });
+
   it("normalizes Bitrix/PHP uppercase photo objects with SRC fields", () => {
     const [event] = parseBitrixWebhook({
       body: {

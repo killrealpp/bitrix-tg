@@ -134,3 +134,47 @@ When the incoming value has no explicit timezone, it is interpreted using
 `BITRIX_LOCAL_UTC_OFFSET_MINUTES`, default `180` for Moscow time. Date-only,
 missing, or invalid active time values fail active social posts before Telegram
 publication when `BITRIX_REQUIRE_EXACT_ACTIVE_FROM=true`.
+
+## 2026-06-26 / Canonical Multi-Social Fields
+
+The direct Bitrix `init.php` integration should send these canonical fields in
+the JSON body:
+
+```json
+{
+  "publish_social": true,
+  "publish_targets": {
+    "telegram": true,
+    "vk": true,
+    "max": true
+  },
+  "post_type": "company_news",
+  "property_meta": [
+    {
+      "id": "123",
+      "code": "PUBLISH_VK",
+      "name": "Опубликовать в ВК (пост)",
+      "value": true
+    }
+  ]
+}
+```
+
+`publish_social` is the master switch. If it is false, individual target flags
+are ignored.
+
+`post_type` is normalized to one of:
+
+- `event`
+- `promo`
+- `company_news`
+- `entertainment`
+- `unknown`
+
+The parser still accepts legacy/fallback aliases in `all_properties`, including
+`pub_news_social`, `publish_telegram`, `publish_vk`, `publish_max`, and
+`social_post_type`. `property_meta` is diagnostic: it helps confirm the real
+Bitrix property codes/names without exposing secrets.
+
+The recommended `init.php` reference implementation is stored in
+`docs/bitrix/init.php`.

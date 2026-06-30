@@ -5,16 +5,23 @@ import {
 } from "../bitrix/photoResolver";
 import type { DbGateway, PublicationKind, StoredBitrixPost } from "../db/DbGateway";
 import {
+  fitForMaxText,
   fitForTelegramCaption,
   fitForTelegramText,
+  fitForVkPost,
   type TextFitOptions
 } from "../text/fitText";
 import { redactSensitiveText } from "../security/redaction";
+import type {
+  ExternalSocialPublisher,
+  ExternalSocialTarget
+} from "../social/types";
 import type { TelegramClient, TelegramMessageRef } from "../telegram/client";
 
 export interface RunDuePostsDeps {
   db: DbGateway;
   telegram: TelegramClient;
+  externalPublishers?: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>>;
   textFit?: TextFitOptions;
   now?: Date;
   limit?: number;
@@ -53,17 +60,13 @@ export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsRes
         lastError: null
       });
       const resolvedPost = await resolveStoredPostPhotos(post, deps.photoResolver);
-      const result = await publishStoredPost(
-        resolvedPost,
-        deps.telegram,
-        deps.textFit
-      );
-      const main = result.messages[0];
+      const result = await publishStoredPostToTargets(resolvedPost, deps);
+      const main = result.telegramMessages[0];
       await deps.db.updatePost(post.id, {
         status: "published",
         chatId: main?.chatId ?? null,
         mainMessageId: main?.messageId ?? null,
-        publicationKind: result.kind,
+        publicationKind: result.telegramKind,
         telegramText: result.telegramText,
         photos: resolvedPost.photos,
         lastError: null,
@@ -72,7 +75,7 @@ export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsRes
       });
       await deps.db.replaceTelegramMessages(
         post.id,
-        result.messages.map((message) => ({
+        result.telegramMessages.map((message) => ({
           chatId: message.chatId,
           tgMessageId: message.messageId,
           role: message.role,
@@ -152,9 +155,95 @@ async function resolveStoredPostPhotos(
   };
 }
 
+async function publishStoredPostToTargets(
+  post: StoredBitrixPost,
+  deps: RunDuePostsDeps
+): Promise<{
+  telegramKind: PublicationKind | null;
+  telegramText: string | null;
+  telegramMessages: TelegramMessageRef[];
+}> {
+  const sourceText = post.preparedText ?? post.sourceText;
+  let telegramKind: PublicationKind | null = null;
+  let telegramText: string | null = null;
+  let telegramMessages: TelegramMessageRef[] = [];
+
+  if (post.publishTargets.telegram) {
+    const result = await publishStoredPost(
+      post,
+      deps.telegram,
+      sourceText,
+      post.preparedText ? undefined : deps.textFit
+    );
+    telegramKind = result.kind;
+    telegramText = result.telegramText;
+    telegramMessages = result.messages;
+    const main = telegramMessages[0];
+    if (main) {
+      await deps.db.upsertSocialPublication(post.id, {
+        target: "telegram",
+        status: "published",
+        externalId: String(main.messageId),
+        externalChatId: main.chatId,
+        publicationKind: telegramKind,
+        sentText: telegramText,
+        photos: post.photos,
+        payloadHash: post.payloadHash,
+        lastError: null,
+        publishedAt: deps.now ?? new Date(),
+        deletedAt: null
+      });
+    }
+  }
+
+  for (const target of externalTargets()) {
+    if (!post.publishTargets[target]) {
+      continue;
+    }
+
+    const existing = await deps.db.findSocialPublication(post.id, target);
+    if (existing?.status === "published") {
+      continue;
+    }
+
+    const publisher = deps.externalPublishers?.[target];
+    if (!publisher) {
+      throw new Error(`${target.toUpperCase()} publisher is not configured`);
+    }
+
+    const text = target === "max" ? await fitForMaxText(sourceText) : await fitForVkPost(sourceText);
+    const result = await publisher.publish({
+      bitrixId: post.bitrixId,
+      text,
+      photos: post.photos,
+      payloadHash: post.payloadHash
+    });
+    await deps.db.upsertSocialPublication(post.id, {
+      target,
+      status: "published",
+      externalId: result.externalId,
+      externalChatId: result.externalChatId ?? null,
+      publicationKind: result.publicationKind,
+      sentText: result.sentText,
+      photos: result.photos,
+      payloadHash: post.payloadHash,
+      lastError: null,
+      publishedAt: deps.now ?? new Date(),
+      deletedAt: null
+    });
+  }
+
+  return {
+    telegramKind,
+    telegramText,
+    telegramMessages
+  };
+}
+
 async function publishStoredPost(
   post: StoredBitrixPost,
   telegram: TelegramClient,
+  sourceText: string,
   textFit?: TextFitOptions
 ): Promise<{
   kind: PublicationKind;
@@ -162,7 +251,7 @@ async function publishStoredPost(
   messages: TelegramMessageRef[];
 }> {
   if (post.photos.length === 0) {
-    const telegramText = await fitForTelegramText(post.sourceText, textFit);
+    const telegramText = await fitForTelegramText(sourceText, textFit);
     const message = await telegram.sendText({ text: telegramText });
     return {
       kind: "text",
@@ -171,7 +260,7 @@ async function publishStoredPost(
     };
   }
 
-  const telegramText = await fitForTelegramCaption(post.sourceText, textFit);
+  const telegramText = await fitForTelegramCaption(sourceText, textFit);
   if (post.photos.length === 1) {
     const message = await telegram.sendPhoto({
       photo: post.photos[0],
@@ -193,4 +282,8 @@ async function publishStoredPost(
     telegramText,
     messages
   };
+}
+
+function externalTargets(): ExternalSocialTarget[] {
+  return ["vk", "max"];
 }

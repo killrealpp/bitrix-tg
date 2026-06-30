@@ -55,6 +55,32 @@ tags:
 
 Уникальность полезно задавать по паре `chat_id` и `tg_message_id`.
 
+## Multi-Social поля и таблица `social_publications`
+
+2026-06-26 / текущая реализация добавляет к `bitrix_posts`:
+
+- `post_type` - нормализованный тип поста для выбора SMM-промпта;
+- `publish_targets_json` - последние выбранные цели `telegram`/`vk`/`max`;
+- `prepared_text` - общий подготовленный текст до platform-fit.
+
+Для каждой платформы используется отдельная таблица `social_publications`:
+
+- `post_id` - ссылка на `bitrix_posts.id`;
+- `target` - `telegram`, `vk` или `max`;
+- `status` - `published`, `deleted` или `failed`;
+- `external_id` - id сообщения/поста во внешней системе;
+- `external_chat_id` - чат/группа/канал во внешней системе;
+- `publication_kind` - `text`, `photo`, `media_group` или `mixed`;
+- `sent_text` - текст, который был отправлен на платформу;
+- `photos_json` - фото, отправленные на платформу;
+- `payload_hash` - хэш нормализованного payload на момент публикации;
+- `last_error`, `published_at`, `deleted_at`, `created_at`, `updated_at`.
+
+Telegram по-прежнему использует `telegram_messages` для точного
+редактирования/удаления отдельных сообщений и альбомов. VK/MAX в первом
+multi-social релизе используют `social_publications` только для publish/delete
+состояния и защиты от дублей.
+
 ## Почему не одна таблица
 
 Одна таблица ломается в трех сценариях:

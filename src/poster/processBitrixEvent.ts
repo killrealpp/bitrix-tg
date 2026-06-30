@@ -19,9 +19,16 @@ import { buildTelegramSourceText } from "../text/buildText";
 import {
   fitForTelegramCaption,
   fitForTelegramText,
+  fitForMaxText,
+  fitForVkPost,
   type TextFitOptions
 } from "../text/fitText";
+import { prepareSocialText } from "../text/socialText";
 import { redactSensitiveText } from "../security/redaction";
+import type {
+  ExternalSocialPublisher,
+  ExternalSocialTarget
+} from "../social/types";
 import type {
   TelegramClient,
   TelegramMessageRef
@@ -49,6 +56,7 @@ export type MediaSyncPolicy = "soft" | "rebuild";
 export interface ProcessBitrixEventDeps {
   db: DbGateway;
   telegram: TelegramClient;
+  externalPublishers?: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>>;
   textFit?: TextFitOptions;
   now?: Date;
   mediaSyncPolicy?: MediaSyncPolicy;
@@ -69,6 +77,12 @@ export interface MissingScheduleTimeAdminNotifier {
     photoIds: string[];
     error: string;
   }): Promise<void>;
+  notifySocialPublicationFailure?(input: {
+    bitrixId: number;
+    target: string;
+    error: string;
+    action: "publish" | "delete";
+  }): Promise<void>;
 }
 
 export async function processBitrixEvent(
@@ -76,25 +90,43 @@ export async function processBitrixEvent(
   deps: ProcessBitrixEventDeps
 ): Promise<ProcessResult> {
   const now = deps.now ?? new Date();
-  const sourceText = buildTelegramSourceText(event);
+  const rawSourceText = buildTelegramSourceText(event);
   const existing = await deps.db.findPostByBitrixId(event.bitrixId);
 
   if (!event.isActive) {
     try {
-      return await handleInactiveEvent(event, deps, sourceText, existing);
+      return await handleDisabledEvent(event, deps, rawSourceText, existing, "inactive");
     } catch (error) {
       return markFailed(event, deps.db, existing, error);
     }
   }
 
-  if (isSocialValueEmpty(event.socialValue)) {
-    return ignoreEvent(
-      event,
-      deps.db,
-      sourceText,
-      existing,
-      "empty_social_value"
-    );
+  if (!event.publishSocial || isSocialValueEmpty(event.socialValue)) {
+    try {
+      return await handleDisabledEvent(
+        event,
+        deps,
+        rawSourceText,
+        existing,
+        "empty_social_value"
+      );
+    } catch (error) {
+      return markFailed(event, deps.db, existing, error);
+    }
+  }
+
+  if (!hasAnyPublishTarget(event)) {
+    try {
+      return await handleDisabledEvent(
+        event,
+        deps,
+        rawSourceText,
+        existing,
+        "empty_publish_targets"
+      );
+    } catch (error) {
+      return markFailed(event, deps.db, existing, error);
+    }
   }
 
   const missingExactTimeError = getMissingExactTimeError(
@@ -105,17 +137,13 @@ export async function processBitrixEvent(
     return failMissingExactTime(
       event,
       deps,
-      sourceText,
+      rawSourceText,
       existing,
       missingExactTimeError
     );
   }
 
-  if (
-    existing &&
-    existing.payloadHash === event.payloadHash &&
-    (existing.status === "published" || existing.status === "scheduled")
-  ) {
+  if (existing && (await isPublicationAlreadySatisfied(event, deps, existing))) {
     return {
       status: "unchanged",
       bitrixId: event.bitrixId,
@@ -126,7 +154,7 @@ export async function processBitrixEvent(
   const resolvedEventResult = await resolveEventPhotos(
     event,
     deps,
-    sourceText,
+    rawSourceText,
     existing
   );
   if ("status" in resolvedEventResult) {
@@ -139,14 +167,16 @@ export async function processBitrixEvent(
     return failUnresolvedPhotos(
       resolvedEvent,
       deps,
-      sourceText,
+      rawSourceText,
       existing,
       unresolvedPhotoError
     );
   }
 
+  const preparedText = await prepareSocialText(resolvedEvent, rawSourceText, deps.textFit);
+
   if (resolvedEvent.scheduledAt && resolvedEvent.scheduledAt.getTime() > now.getTime()) {
-    await upsertScheduledPost(resolvedEvent, deps.db, sourceText, existing);
+    await upsertScheduledPost(resolvedEvent, deps.db, rawSourceText, preparedText, existing);
     return {
       status: "scheduled",
       bitrixId: resolvedEvent.bitrixId,
@@ -155,15 +185,13 @@ export async function processBitrixEvent(
   }
 
   try {
-    if (!existing) {
-      return await publishNewEvent(resolvedEvent, deps, sourceText, existing);
-    }
-
-    if (shouldPublishAsNew(existing)) {
-      return await publishNewEvent(resolvedEvent, deps, sourceText, existing);
-    }
-
-    return await editExistingEvent(resolvedEvent, deps, sourceText, existing);
+    return await publishOrSyncActiveEvent(
+      resolvedEvent,
+      deps,
+      rawSourceText,
+      preparedText,
+      existing
+    );
   } catch (error) {
     return markFailed(resolvedEvent, deps.db, existing, error);
   }
@@ -197,6 +225,9 @@ async function failMissingExactTime(
     status: "failed" as const,
     scheduledAt: event.scheduledAt,
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     photos: event.photos,
     payloadHash: event.payloadHash,
     lastError: message,
@@ -246,6 +277,10 @@ function shouldPublishAsNew(existing: StoredBitrixPost | null): boolean {
     return true;
   }
 
+  if (existing.status === "published" && !hasTelegramReference(existing)) {
+    return true;
+  }
+
   if (existing.status === "ignored" || existing.status === "scheduled") {
     return true;
   }
@@ -258,6 +293,428 @@ function shouldPublishAsNew(existing: StoredBitrixPost | null): boolean {
   }
 
   return false;
+}
+
+function hasAnyPublishTarget(event: ParsedBitrixEvent): boolean {
+  return event.publishTargets.telegram || event.publishTargets.vk || event.publishTargets.max;
+}
+
+async function isPublicationAlreadySatisfied(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  existing: StoredBitrixPost
+): Promise<boolean> {
+  if (
+    existing.payloadHash !== event.payloadHash ||
+    (existing.status !== "published" && existing.status !== "scheduled")
+  ) {
+    return false;
+  }
+
+  if (existing.status === "scheduled") {
+    return true;
+  }
+
+  if (event.publishTargets.telegram !== hasTelegramReference(existing)) {
+    return false;
+  }
+
+  for (const target of externalTargets()) {
+    const publication = await deps.db.findSocialPublication(existing.id, target);
+    const isPublished = publication?.status === "published";
+    if (event.publishTargets[target] !== isPublished) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function publishOrSyncActiveEvent(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  rawSourceText: string,
+  preparedText: string,
+  existing: StoredBitrixPost | null
+): Promise<ProcessResult> {
+  let workingPost = existing;
+  const touched: ProcessStatus[] = [];
+  const messageIds: number[] = [];
+
+  if (event.publishTargets.telegram) {
+    if (
+      workingPost &&
+      hasTelegramReference(workingPost) &&
+      workingPost.status === "published" &&
+      workingPost.sourceText === preparedText &&
+      photosEqual(workingPost.photos, event.photos)
+    ) {
+      workingPost = await deps.db.updatePost(workingPost.id, {
+        status: "published",
+        scheduledAt: event.scheduledAt,
+        sourceText: preparedText,
+        preparedText,
+        postType: event.postType,
+        publishTargets: event.publishTargets,
+        photos: event.photos,
+        payloadHash: event.payloadHash,
+        lastError: null,
+        scheduledRetryCount: 0,
+        adminNotifiedAt: null
+      });
+      await recordTelegramPublication(deps.db, workingPost, event.payloadHash);
+    } else if (!workingPost || shouldPublishAsNew(workingPost)) {
+      const result = await publishNewEvent(event, deps, preparedText, workingPost);
+      touched.push(result.status);
+      messageIds.push(...(result.messageIds ?? []));
+      workingPost = await deps.db.findPostByBitrixId(event.bitrixId);
+      if (workingPost) {
+        await recordTelegramPublication(deps.db, workingPost, event.payloadHash);
+      }
+    } else {
+      const result = await editExistingEvent(event, deps, preparedText, workingPost);
+      touched.push(result.status);
+      messageIds.push(...(result.messageIds ?? []));
+      workingPost = await deps.db.findPostByBitrixId(event.bitrixId);
+      if (workingPost) {
+        await recordTelegramPublication(deps.db, workingPost, event.payloadHash);
+      }
+    }
+  } else {
+    workingPost = await upsertPostWithoutTelegram(
+      event,
+      deps.db,
+      rawSourceText,
+      preparedText,
+      workingPost
+    );
+    const deleted = await deleteTelegramTargetIfNeeded(event, deps, workingPost);
+    if (deleted.length > 0) {
+      touched.push("deleted");
+      messageIds.push(...deleted);
+      workingPost = await deps.db.findPostByBitrixId(event.bitrixId);
+    }
+  }
+
+  if (!workingPost) {
+    workingPost = await upsertPostWithoutTelegram(
+      event,
+      deps.db,
+      rawSourceText,
+      preparedText,
+      null
+    );
+  }
+
+  const externalResult = await syncExternalTargets(event, deps, workingPost, preparedText);
+  touched.push(...externalResult.statuses);
+
+  const freshPost = await deps.db.findPostByBitrixId(event.bitrixId);
+  if (freshPost) {
+    await deps.db.updatePost(freshPost.id, {
+      status: "published",
+      scheduledAt: event.scheduledAt,
+      sourceText: event.publishTargets.telegram ? preparedText : rawSourceText,
+      preparedText,
+      postType: event.postType,
+      publishTargets: event.publishTargets,
+      photos: event.photos,
+      payloadHash: event.payloadHash,
+      lastError: null,
+      scheduledRetryCount: 0,
+      adminNotifiedAt: null
+    });
+  }
+
+  const status = summarizeStatuses(touched);
+  return {
+    status,
+    bitrixId: event.bitrixId,
+    messageIds: messageIds.length > 0 ? messageIds : undefined,
+    reason: status === "unchanged" ? "targets_already_satisfied" : undefined
+  };
+}
+
+async function upsertPostWithoutTelegram(
+  event: ParsedBitrixEvent,
+  db: DbGateway,
+  rawSourceText: string,
+  preparedText: string,
+  existing: StoredBitrixPost | null
+): Promise<StoredBitrixPost> {
+  const patch = {
+    status: "publishing" as const,
+    scheduledAt: event.scheduledAt,
+    sourceText: rawSourceText,
+    preparedText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
+    photos: event.photos,
+    payloadHash: event.payloadHash,
+    lastError: null,
+    scheduledRetryCount: 0,
+    adminNotifiedAt: null
+  };
+
+  if (existing) {
+    return db.updatePost(existing.id, patch);
+  }
+
+  return db.createPost({
+    bitrixId: event.bitrixId,
+    ...patch
+  });
+}
+
+async function recordTelegramPublication(
+  db: DbGateway,
+  post: StoredBitrixPost,
+  payloadHash: string
+): Promise<void> {
+  if (!post.chatId || !post.mainMessageId) {
+    return;
+  }
+
+  await db.upsertSocialPublication(post.id, {
+    target: "telegram",
+    status: "published",
+    externalId: String(post.mainMessageId),
+    externalChatId: post.chatId,
+    publicationKind: post.publicationKind,
+    sentText: post.telegramText,
+    photos: post.photos,
+    payloadHash,
+    lastError: null,
+    publishedAt: new Date(),
+    deletedAt: null
+  });
+}
+
+async function syncExternalTargets(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  post: StoredBitrixPost,
+  preparedText: string
+): Promise<{ statuses: ProcessStatus[] }> {
+  const statuses: ProcessStatus[] = [];
+
+  for (const target of externalTargets()) {
+    if (!event.publishTargets[target]) {
+      const deleted = await deleteExternalTargetIfNeeded(event, deps, post, target);
+      if (deleted) {
+        statuses.push("deleted");
+      }
+      continue;
+    }
+
+    const existingPublication = await deps.db.findSocialPublication(post.id, target);
+    if (existingPublication?.status === "published") {
+      continue;
+    }
+
+    const publisher = deps.externalPublishers?.[target];
+    if (!publisher) {
+      const message = `${target.toUpperCase()} publisher is not configured`;
+      await deps.db.upsertSocialPublication(post.id, {
+        target,
+        status: "failed",
+        photos: event.photos,
+        payloadHash: event.payloadHash,
+        lastError: message
+      });
+      await notifySocialFailure(event, deps, target, message, "publish");
+      throw new Error(message);
+    }
+
+    try {
+      const text = target === "max" ? await fitForMaxText(preparedText) : await fitForVkPost(preparedText);
+      const result = await publisher.publish({
+        bitrixId: event.bitrixId,
+        text,
+        photos: event.photos,
+        payloadHash: event.payloadHash
+      });
+      await deps.db.upsertSocialPublication(post.id, {
+        target,
+        status: "published",
+        externalId: result.externalId,
+        externalChatId: result.externalChatId ?? null,
+        publicationKind: result.publicationKind,
+        sentText: result.sentText,
+        photos: result.photos,
+        payloadHash: event.payloadHash,
+        lastError: null,
+        publishedAt: deps.now ?? new Date(),
+        deletedAt: null
+      });
+      statuses.push("published");
+    } catch (error) {
+      const message = redactErrorMessage(error);
+      await deps.db.upsertSocialPublication(post.id, {
+        target,
+        status: "failed",
+        photos: event.photos,
+        payloadHash: event.payloadHash,
+        lastError: message
+      });
+      await notifySocialFailure(event, deps, target, message, "publish");
+      throw error;
+    }
+  }
+
+  return { statuses };
+}
+
+async function deleteTelegramTargetIfNeeded(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  existing: StoredBitrixPost
+): Promise<number[]> {
+  if (!hasTelegramReference(existing)) {
+    return [];
+  }
+
+  const messagesToDelete = await listMessagesToDelete(deps.db, existing);
+  const deletedMessageIds: number[] = [];
+  for (const message of messagesToDelete) {
+    await deps.telegram.deleteMessage({
+      chatId: message.chatId,
+      messageId: message.tgMessageId
+    });
+    deletedMessageIds.push(message.tgMessageId);
+  }
+
+  await deps.db.replaceTelegramMessages(existing.id, []);
+  await deps.db.upsertSocialPublication(existing.id, {
+    target: "telegram",
+    status: "deleted",
+    externalId: existing.mainMessageId ? String(existing.mainMessageId) : null,
+    externalChatId: existing.chatId,
+    publicationKind: existing.publicationKind,
+    sentText: existing.telegramText,
+    photos: existing.photos,
+    payloadHash: event.payloadHash,
+    lastError: null,
+    deletedAt: deps.now ?? new Date(),
+    publishedAt: null
+  });
+  await deps.db.updatePost(existing.id, {
+    chatId: null,
+    mainMessageId: null,
+    publicationKind: null,
+    telegramText: null
+  });
+
+  return deletedMessageIds;
+}
+
+async function deleteExternalTargetIfNeeded(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  post: StoredBitrixPost,
+  target: ExternalSocialTarget
+): Promise<boolean> {
+  const publication = await deps.db.findSocialPublication(post.id, target);
+  if (publication?.status !== "published" || !publication.externalId) {
+    return false;
+  }
+
+  const publisher = deps.externalPublishers?.[target];
+  if (!publisher) {
+    const message = `${target.toUpperCase()} publisher is not configured for delete`;
+    await deps.db.upsertSocialPublication(post.id, {
+      target,
+      status: "failed",
+      externalId: publication.externalId,
+      externalChatId: publication.externalChatId,
+      publicationKind: publication.publicationKind,
+      sentText: publication.sentText,
+      photos: publication.photos,
+      payloadHash: event.payloadHash,
+      lastError: message,
+      publishedAt: publication.publishedAt,
+      deletedAt: null
+    });
+    await notifySocialFailure(event, deps, target, message, "delete");
+    throw new Error(message);
+  }
+
+  try {
+    await publisher.delete({
+      externalId: publication.externalId,
+      externalChatId: publication.externalChatId
+    });
+    await deps.db.upsertSocialPublication(post.id, {
+      target,
+      status: "deleted",
+      externalId: publication.externalId,
+      externalChatId: publication.externalChatId,
+      publicationKind: publication.publicationKind,
+      sentText: publication.sentText,
+      photos: publication.photos,
+      payloadHash: event.payloadHash,
+      lastError: null,
+      publishedAt: publication.publishedAt,
+      deletedAt: deps.now ?? new Date()
+    });
+    return true;
+  } catch (error) {
+    const message = redactErrorMessage(error);
+    await deps.db.upsertSocialPublication(post.id, {
+      target,
+      status: "failed",
+      externalId: publication.externalId,
+      externalChatId: publication.externalChatId,
+      publicationKind: publication.publicationKind,
+      sentText: publication.sentText,
+      photos: publication.photos,
+      payloadHash: event.payloadHash,
+      lastError: message,
+      publishedAt: publication.publishedAt,
+      deletedAt: null
+    });
+    await notifySocialFailure(event, deps, target, message, "delete");
+    throw error;
+  }
+}
+
+async function notifySocialFailure(
+  event: ParsedBitrixEvent,
+  deps: ProcessBitrixEventDeps,
+  target: string,
+  error: string,
+  action: "publish" | "delete"
+): Promise<void> {
+  try {
+    await deps.adminNotifier?.notifySocialPublicationFailure?.({
+      bitrixId: event.bitrixId,
+      target,
+      error,
+      action
+    });
+  } catch {
+    // Admin notification failure must not mask the original target error.
+  }
+}
+
+function externalTargets(): ExternalSocialTarget[] {
+  return ["vk", "max"];
+}
+
+function summarizeStatuses(statuses: ProcessStatus[]): ProcessStatus {
+  if (statuses.includes("deleted")) {
+    return "deleted";
+  }
+
+  if (statuses.includes("edited")) {
+    return "edited";
+  }
+
+  if (statuses.includes("published")) {
+    return "published";
+  }
+
+  return "unchanged";
 }
 
 async function resolveEventPhotos(
@@ -349,6 +806,9 @@ async function failUnresolvedPhotos(
     status: "failed" as const,
     scheduledAt: event.scheduledAt,
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     photos: event.photos,
     payloadHash: event.payloadHash,
     lastError: message,
@@ -376,12 +836,16 @@ async function upsertScheduledPost(
   event: ParsedBitrixEvent,
   db: DbGateway,
   sourceText: string,
+  preparedText: string,
   existing: StoredBitrixPost | null
 ): Promise<void> {
   const patch = {
     status: "scheduled" as const,
     scheduledAt: event.scheduledAt,
     sourceText,
+    preparedText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     photos: event.photos,
     payloadHash: event.payloadHash,
     lastError: null,
@@ -412,6 +876,9 @@ async function publishNewEvent(
       bitrixId: event.bitrixId,
       status: "publishing",
       sourceText,
+      preparedText: sourceText,
+      postType: event.postType,
+      publishTargets: event.publishTargets,
       photos: event.photos,
       payloadHash: event.payloadHash
     }));
@@ -420,6 +887,9 @@ async function publishNewEvent(
     await deps.db.updatePost(existing.id, {
       status: "publishing",
       sourceText,
+      preparedText: sourceText,
+      postType: event.postType,
+      publishTargets: event.publishTargets,
       photos: event.photos,
       payloadHash: event.payloadHash,
       lastError: null,
@@ -438,6 +908,9 @@ async function publishNewEvent(
     publicationKind: published.kind,
     scheduledAt: event.scheduledAt,
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     telegramText: published.telegramText,
     photos: event.photos,
     payloadHash: event.payloadHash,
@@ -475,6 +948,9 @@ async function editExistingEvent(
     await deps.db.updatePost(existing.id, {
       status: "published",
       sourceText,
+      preparedText: sourceText,
+      postType: event.postType,
+      publishTargets: event.publishTargets,
       telegramText,
       photos: event.photos,
       payloadHash: event.payloadHash,
@@ -505,6 +981,9 @@ async function editExistingEvent(
       status: "published",
       publicationKind: "mixed",
       sourceText,
+      preparedText: sourceText,
+      postType: event.postType,
+      publishTargets: event.publishTargets,
       photos: event.photos,
       payloadHash: event.payloadHash,
       lastError: null,
@@ -584,6 +1063,9 @@ async function editMixedEvent(
         ? "mixed"
         : "text",
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     telegramText,
     photos: event.photos,
     payloadHash: event.payloadHash,
@@ -673,6 +1155,9 @@ async function editMediaEvent(
   await deps.db.updatePost(existing.id, {
     status: "published",
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     telegramText,
     photos: event.photos,
     payloadHash: event.payloadHash,
@@ -713,6 +1198,9 @@ async function rebuildExistingEvent(
     mainMessageId: main?.messageId ?? null,
     publicationKind: published.kind,
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: event.publishTargets,
     telegramText: published.telegramText,
     photos: event.photos,
     payloadHash: event.payloadHash,
@@ -950,6 +1438,9 @@ async function ignoreEvent(
         status: "ignored",
         scheduledAt: null,
         sourceText,
+        preparedText: sourceText,
+        postType: event.postType,
+        publishTargets: event.publishTargets,
         photos: event.photos,
         payloadHash: event.payloadHash,
         lastError: null,
@@ -962,41 +1453,32 @@ async function ignoreEvent(
   return ignored(event, reason);
 }
 
-async function handleInactiveEvent(
+async function handleDisabledEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
-  existing: StoredBitrixPost | null
+  existing: StoredBitrixPost | null,
+  reason: string
 ): Promise<ProcessResult> {
-  if (!existing || !hasTelegramReference(existing)) {
-    return ignoreEvent(event, deps.db, sourceText, existing, "inactive");
+  if (!existing) {
+    return ignoreEvent(event, deps.db, sourceText, existing, reason);
   }
 
-  const storedMessages = await deps.db.listTelegramMessages(existing.id);
-  const messagesToDelete =
-    storedMessages.length > 0
-      ? storedMessages
-      : [
-          {
-            chatId: existing.chatId,
-            tgMessageId: existing.mainMessageId
-          }
-        ];
   const deletedMessageIds: number[] = [];
-
-  for (const message of messagesToDelete) {
-    if (!message.chatId || !message.tgMessageId) {
-      continue;
-    }
-
-    await deps.telegram.deleteMessage({
-      chatId: message.chatId,
-      messageId: message.tgMessageId
-    });
-    deletedMessageIds.push(message.tgMessageId);
+  if (hasTelegramReference(existing)) {
+    deletedMessageIds.push(...(await deleteTelegramTargetIfNeeded(event, deps, existing)));
   }
 
-  await deps.db.replaceTelegramMessages(existing.id, []);
+  for (const target of externalTargets()) {
+    await deleteExternalTargetIfNeeded(event, deps, existing, target);
+  }
+
+  const deletedSomething =
+    deletedMessageIds.length > 0 ||
+    (await deps.db.listSocialPublications(existing.id)).some(
+      (publication) => publication.status === "deleted"
+    );
+
   await deps.db.updatePost(existing.id, {
     status: "ignored",
     chatId: null,
@@ -1004,6 +1486,13 @@ async function handleInactiveEvent(
     publicationKind: null,
     scheduledAt: null,
     sourceText,
+    preparedText: sourceText,
+    postType: event.postType,
+    publishTargets: {
+      telegram: false,
+      vk: false,
+      max: false
+    },
     photos: event.photos,
     payloadHash: event.payloadHash,
     telegramText: null,
@@ -1012,10 +1501,14 @@ async function handleInactiveEvent(
     adminNotifiedAt: null
   });
 
+  if (!deletedSomething) {
+    return ignored(event, reason);
+  }
+
   return {
     status: "deleted",
     bitrixId: event.bitrixId,
-    reason: "inactive",
+    reason,
     messageIds: deletedMessageIds
   };
 }

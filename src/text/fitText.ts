@@ -10,8 +10,20 @@ export interface TextFitRequest {
   kind: "text" | "caption";
 }
 
+export interface SocialTextPrepareRequest {
+  text: string;
+  postType: "event" | "promo" | "company_news";
+  target: number;
+  title: string;
+  previewText: string;
+  detailText: string;
+  scheduledAtRawValue: string | null;
+  url: string;
+}
+
 export interface TextFitOptions {
   aiFit?: (request: TextFitRequest) => Promise<string>;
+  aiPrepare?: (request: SocialTextPrepareRequest) => Promise<string>;
 }
 
 export async function fitForTelegramText(
@@ -32,6 +44,14 @@ export async function fitForTelegramCaption(
     "caption",
     options
   );
+}
+
+export async function fitForMaxText(text: string): Promise<string> {
+  return fitText(text, 4000, 3800, "text", {});
+}
+
+export async function fitForVkPost(text: string): Promise<string> {
+  return fitText(text, 16_000, 15_500, "text", {});
 }
 
 async function fitText(
@@ -62,7 +82,11 @@ async function fitText(
   return truncateAtWord(normalized, target);
 }
 
-function truncateAtWord(text: string, target: number): string {
+export function truncateAtWord(text: string, target: number): string {
+  if (text.length <= target) {
+    return text;
+  }
+
   if (target <= 3) {
     return "...".slice(0, target);
   }

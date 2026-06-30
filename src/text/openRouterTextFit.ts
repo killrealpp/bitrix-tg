@@ -1,5 +1,9 @@
 import { redactSensitiveText } from "../security/redaction";
-import type { TextFitOptions, TextFitRequest } from "./fitText";
+import type {
+  SocialTextPrepareRequest,
+  TextFitOptions,
+  TextFitRequest
+} from "./fitText";
 
 export interface OpenRouterTextFitOptions {
   apiKey: string;
@@ -27,7 +31,8 @@ export function createOpenRouterTextFit(
 ): TextFitOptions {
   const client = new OpenRouterTextFitter(options);
   return {
-    aiFit: (request) => client.fit(request)
+    aiFit: (request) => client.fit(request),
+    aiPrepare: (request) => client.prepareSocialPost(request)
   };
 }
 
@@ -43,6 +48,20 @@ export class OpenRouterTextFitter {
   }
 
   async fit(request: TextFitRequest): Promise<string> {
+    return this.chatCompletion(buildMessages(request), Math.max(64, Math.ceil(request.target / 3)));
+  }
+
+  async prepareSocialPost(request: SocialTextPrepareRequest): Promise<string> {
+    return this.chatCompletion(buildSocialPostMessages(request), 900);
+  }
+
+  private async chatCompletion(
+    messages: Array<{
+      role: "system" | "user";
+      content: string;
+    }>,
+    maxTokens: number
+  ): Promise<string> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -54,9 +73,9 @@ export class OpenRouterTextFitter {
           headers: this.buildHeaders(),
           body: JSON.stringify({
             model: this.options.model,
-            messages: buildMessages(request),
+            messages,
             temperature: 0.2,
-            max_tokens: Math.max(64, Math.ceil(request.target / 3)),
+            max_tokens: maxTokens,
             stream: false
           }),
           signal: controller.signal
@@ -131,6 +150,75 @@ function buildMessages(request: TextFitRequest): Array<{
       ].join("\n")
     }
   ];
+}
+
+function buildSocialPostMessages(request: SocialTextPrepareRequest): Array<{
+  role: "system" | "user";
+  content: string;
+}> {
+  return [
+    {
+      role: "system",
+      content: [
+        "Ты профессиональный SMM-копирайтер магазина сварочного оборудования,",
+        "электроинструмента, силовой и садовой техники «СВАРНОЙ».",
+        "Пиши на русском языке. Не выдумывай факты, даты, цены, адреса или условия.",
+        "Верни только готовый текст поста без пояснений."
+      ].join(" ")
+    },
+    {
+      role: "user",
+      content: [
+        getPromptForPostType(request.postType),
+        "",
+        `Лимит: не более ${request.target} символов.`,
+        "",
+        "Исходные данные:",
+        `Заголовок: ${request.title || "нет"}`,
+        `Анонс: ${request.previewText || "нет"}`,
+        `Подробный текст: ${request.detailText || "нет"}`,
+        `Дата и время: ${request.scheduledAtRawValue || "нет"}`,
+        `Ссылка на источник: ${request.url || "нет"}`,
+        "",
+        "Текст для адаптации:",
+        request.text
+      ].join("\n")
+    }
+  ];
+}
+
+function getPromptForPostType(postType: SocialTextPrepareRequest["postType"]): string {
+  if (postType === "event") {
+    return [
+      "Формат: «Событие». Адаптируй информацию о предстоящем мероприятии в пост-приглашение.",
+      "Тон: экспертный, гостеприимный, без крика и навязчивости.",
+      "Структура: заголовок с умеренным эмодзи 📅/🗓/📍; что это за событие, кто проводит, где и когда;",
+      "2-3 практические причины посетить с ✅; детали участия; мягкий призыв написать в @MagazinSvarnoy;",
+      "3-5 релевантных хэштегов.",
+      "Не копируй исходный текст дословно. Сохрани все даты, время и адрес. Не больше 2-4 эмодзи."
+    ].join(" ");
+  }
+
+  if (postType === "promo") {
+    return [
+      "Формат: «Акция». Адаптируй информацию об акции, скидке, спецпредложении или распродаже.",
+      "Тон: энергичный и деловой, без крика, воды и рекламных штампов.",
+      "Структура: заголовок с умеренным эмодзи 🔥/💸/⚡️/🎁; условия акции и сроки;",
+      "2-3 выгоды для покупателя с ✅; цена только если она дана в исходных данных;",
+      "если цены нет, напиши: «💰 Специальная цена на эту линейку. Узнайте вашу выгоду в чате за 1 минуту»;",
+      "мягкий призыв написать в @MagazinSvarnoy; 3-5 релевантных хэштегов.",
+      "Не выдумывай цифры, сроки или цены. Не пиши «цена на сайте»."
+    ].join(" ");
+  }
+
+  return [
+    "Формат: «Новость компании». Адаптируй новость в деловой пост.",
+    "Тон: экспертный, уважительный, без пафоса и рекламных штампов.",
+    "Структура: заголовок с умеренным эмодзи 📢/📰/📌; 3-5 строк с ключевыми фактами;",
+    "почему это важно или полезно клиенту; детали без перегрузки; мягкий призыв написать в @MagazinSvarnoy;",
+    "3-5 релевантных хэштегов.",
+    "Не копируй исходный текст дословно и не выдумывай факты."
+  ].join(" ");
 }
 
 function getOpenRouterError(data: OpenRouterChatResponse): string {

@@ -8,6 +8,7 @@ import {
 import {
   FakeBitrixPhotoResolver,
   FakeDbGateway,
+  FakeExternalPublisher,
   FakeTelegramClient
 } from "./fakes";
 
@@ -58,6 +59,64 @@ describe("scheduled publishing", () => {
       now: new Date("2026-06-04T13:05:00.000Z")
     });
     expect(thirdRun).toEqual({ checked: 0, published: 0, failed: 0 });
+  });
+
+  it("stores and publishes Telegram, VK, and MAX scheduled targets together", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const vk = new FakeExternalPublisher("vk");
+    const max = new FakeExternalPublisher("max");
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 31,
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "Y"
+        },
+        post_type: "Акция",
+        name: "Future multi-social",
+        active_from: "2026-06-04T13:00:00.000Z",
+        all_properties: {
+          PHOTOS: [
+            {
+              url: "https://example.com/future.jpg"
+            }
+          ]
+        }
+      }
+    });
+
+    const scheduled = await processBitrixEvent(event, {
+      db,
+      telegram,
+      externalPublishers: { vk, max },
+      textFit: {
+        aiPrepare: async () => "Prepared scheduled social post"
+      },
+      now: new Date("2026-06-04T12:00:00.000Z")
+    });
+    const result = await runDuePosts({
+      db,
+      telegram,
+      externalPublishers: { vk, max },
+      now: new Date("2026-06-04T13:00:00.000Z")
+    });
+
+    expect(scheduled.status).toBe("scheduled");
+    expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
+    expect(vk.publishCalls).toHaveLength(1);
+    expect(max.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls[0].text).toBe("Prepared scheduled social post");
+    expect(max.publishCalls[0].text).toBe("Prepared scheduled social post");
+    expect(db.socialPublications.map((publication) => publication.target).sort()).toEqual([
+      "max",
+      "telegram",
+      "vk"
+    ]);
   });
 
   it("resolves stored Bitrix photo ids before publishing due scheduled posts", async () => {

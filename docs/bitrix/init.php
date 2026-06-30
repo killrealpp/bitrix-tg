@@ -1,0 +1,476 @@
+<?php
+if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED !== true) {
+    return;
+}
+
+const BITRIX_TG_WEBHOOK_URL = "http://212.43.154.110:18080/webhooks/bitrix";
+const BITRIX_TG_WEBHOOK_SECRET = "";
+const BITRIX_TG_IBLOCK_ID = 151;
+const BITRIX_TG_PUBLIC_HOST = "https://svarnoy-market.ru";
+const BITRIX_TG_DEBUG_LAST_PAYLOAD = true;
+const BITRIX_TG_DEBUG_PAYLOAD_PATH = "/local/bitrix_tg_last_payload.json";
+
+AddEventHandler("iblock", "OnAfterIBlockElementAdd", "bitrixTgOnAfterIBlockElementAdd");
+AddEventHandler("iblock", "OnAfterIBlockElementUpdate", "bitrixTgOnAfterIBlockElementUpdate");
+
+function bitrixTgOnAfterIBlockElementAdd(&$arFields)
+{
+    bitrixTgSendElementWebhook($arFields, "add");
+}
+
+function bitrixTgOnAfterIBlockElementUpdate(&$arFields)
+{
+    bitrixTgSendElementWebhook($arFields, "update");
+}
+
+function bitrixTgSendElementWebhook(array $arFields, string $action): void
+{
+    if (isset($arFields["RESULT"]) && $arFields["RESULT"] === false) {
+        return;
+    }
+
+    $elementId = (int)($arFields["ID"] ?? 0);
+    if ($elementId <= 0) {
+        return;
+    }
+
+    if (!\Bitrix\Main\Loader::includeModule("iblock")) {
+        return;
+    }
+
+    $payload = bitrixTgBuildPayload($elementId, $action);
+    if (!$payload) {
+        return;
+    }
+
+    if (BITRIX_TG_IBLOCK_ID > 0 && (int)$payload["iblock_id"] !== BITRIX_TG_IBLOCK_ID) {
+        return;
+    }
+
+    bitrixTgWriteDebugPayload($payload);
+    bitrixTgPostJson(BITRIX_TG_WEBHOOK_URL, $payload, BITRIX_TG_WEBHOOK_SECRET);
+}
+
+function bitrixTgBuildPayload(int $elementId, string $action): ?array
+{
+    $select = [
+        "ID",
+        "IBLOCK_ID",
+        "IBLOCK_SECTION_ID",
+        "NAME",
+        "CODE",
+        "DATE_CREATE",
+        "TIMESTAMP_X",
+        "ACTIVE_FROM",
+        "ACTIVE_TO",
+        "ACTIVE",
+        "SORT",
+        "PREVIEW_TEXT",
+        "DETAIL_TEXT",
+        "PREVIEW_PICTURE",
+        "DETAIL_PICTURE",
+        "DETAIL_PAGE_URL",
+    ];
+
+    $result = \CIBlockElement::GetList([], ["ID" => $elementId], false, false, $select);
+    $fields = $result->Fetch();
+    if (!$fields) {
+        return null;
+    }
+
+    $iblockId = (int)$fields["IBLOCK_ID"];
+    $iblock = \CIBlock::GetByID($iblockId)->Fetch() ?: [];
+    $properties = bitrixTgReadProperties($iblockId, $elementId);
+    $allProperties = bitrixTgFlattenProperties($properties);
+    $photos = bitrixTgExtractPhotos($properties, $fields);
+    if ($photos) {
+        $allProperties["PHOTOS"] = $photos;
+    }
+
+    $master = bitrixTgFindProperty(
+        $properties,
+        ["pub_news_social", "publish_social", "social_publish", "publish_to_social"],
+        ["Публиковать в соц.сетях", "Публиковать в соцсетях", "Публиковать в социальные сети"]
+    );
+    $telegram = bitrixTgFindProperty(
+        $properties,
+        ["publish_telegram", "telegram_publish", "pub_news_telegram", "publish_to_telegram"],
+        ["Опубликовать в Telegram", "Telegram"]
+    );
+    $vk = bitrixTgFindProperty(
+        $properties,
+        ["publish_vk", "vk_publish", "pub_news_vk", "publish_to_vk", "publish_vkontakte"],
+        ["Опубликовать в ВК", "Опубликовать во ВКонтакте", "ВК (пост)", "VK"]
+    );
+    $max = bitrixTgFindProperty(
+        $properties,
+        ["publish_max", "max_publish", "pub_news_max", "publish_to_max"],
+        ["Опубликовать в MAX", "Опубликовать в Макс", "MAX"]
+    );
+    $postType = bitrixTgFindProperty(
+        $properties,
+        ["post_type", "social_post_type", "content_type", "publication_type"],
+        ["Тип поста", "Тип публикации", "Формат публикации", "Тип контента"]
+    );
+
+    $publishSocial = bitrixTgPropertyTruthy($master);
+    $publishTargets = [
+        "telegram" => $publishSocial && bitrixTgPropertyTruthy($telegram),
+        "vk" => $publishSocial && bitrixTgPropertyTruthy($vk),
+        "max" => $publishSocial && bitrixTgPropertyTruthy($max),
+    ];
+
+    return [
+        "action" => $action,
+        "source" => "bitrix-init.php",
+        "iblock_id" => $iblockId,
+        "iblock_code" => (string)($iblock["CODE"] ?? ""),
+        "iblock_name" => (string)($iblock["NAME"] ?? ""),
+        "iblock_type" => (string)($iblock["IBLOCK_TYPE_ID"] ?? ""),
+        "element_id" => $elementId,
+        "name" => (string)($fields["NAME"] ?? ""),
+        "code" => (string)($fields["CODE"] ?? ""),
+        "date_create" => bitrixTgNullableString($fields["DATE_CREATE"] ?? null),
+        "date_modify" => bitrixTgNullableString($fields["TIMESTAMP_X"] ?? null),
+        "active_from" => bitrixTgNullableString($fields["ACTIVE_FROM"] ?? null),
+        "active_to" => bitrixTgNullableString($fields["ACTIVE_TO"] ?? null),
+        "active" => (string)($fields["ACTIVE"] ?? "N"),
+        "sort" => (string)($fields["SORT"] ?? ""),
+        "preview_text" => (string)($fields["PREVIEW_TEXT"] ?? ""),
+        "detail_text" => (string)($fields["DETAIL_TEXT"] ?? ""),
+        "preview_picture" => bitrixTgFilePhoto($fields["PREVIEW_PICTURE"] ?? null),
+        "detail_picture" => bitrixTgFilePhoto($fields["DETAIL_PICTURE"] ?? null),
+        "pub_news_social" => bitrixTgPropertyDisplayValue($master),
+        "publish_social" => $publishSocial,
+        "publish_targets" => $publishTargets,
+        "post_type" => bitrixTgPropertyDisplayValue($postType) ?: "unknown",
+        "url" => "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID={$iblockId}&ID={$elementId}",
+        "public_url" => bitrixTgAbsoluteUrl((string)($fields["DETAIL_PAGE_URL"] ?? "")),
+        "all_properties" => $allProperties,
+        "property_meta" => bitrixTgPropertyMeta($properties),
+    ];
+}
+
+function bitrixTgReadProperties(int $iblockId, int $elementId): array
+{
+    $properties = [];
+    $rows = \CIBlockElement::GetProperty($iblockId, $elementId, ["sort" => "asc"], []);
+    while ($row = $rows->Fetch()) {
+        $code = trim((string)($row["CODE"] ?? ""));
+        if ($code === "") {
+            $code = "PROPERTY_" . (string)$row["ID"];
+        }
+
+        if (!isset($properties[$code])) {
+            $properties[$code] = [
+                "id" => (string)$row["ID"],
+                "code" => $code,
+                "name" => (string)($row["NAME"] ?? ""),
+                "type" => (string)($row["PROPERTY_TYPE"] ?? ""),
+                "multiple" => (string)($row["MULTIPLE"] ?? "N"),
+                "rows" => [],
+            ];
+        }
+
+        $properties[$code]["rows"][] = $row;
+    }
+
+    return $properties;
+}
+
+function bitrixTgFlattenProperties(array $properties): array
+{
+    $result = [];
+    foreach ($properties as $code => $property) {
+        $values = [];
+        foreach ($property["rows"] as $row) {
+            $value = bitrixTgRowDisplayValue($row);
+            if (bitrixTgIsEmptyValue($value)) {
+                continue;
+            }
+
+            $values[] = $value;
+        }
+
+        $result[$code] = count($values) <= 1 ? ($values[0] ?? null) : $values;
+    }
+
+    return $result;
+}
+
+function bitrixTgPropertyMeta(array $properties): array
+{
+    $meta = [];
+    foreach ($properties as $property) {
+        $meta[] = [
+            "id" => $property["id"],
+            "code" => $property["code"],
+            "name" => $property["name"],
+            "value" => bitrixTgPropertyDisplayValue($property),
+        ];
+    }
+
+    return $meta;
+}
+
+function bitrixTgFindProperty(array $properties, array $codeAliases, array $nameFragments): ?array
+{
+    $normalizedCodes = array_map("bitrixTgNormalizeCode", $codeAliases);
+
+    foreach ($properties as $property) {
+        if (in_array(bitrixTgNormalizeCode($property["code"]), $normalizedCodes, true)) {
+            return $property;
+        }
+    }
+
+    foreach ($properties as $property) {
+        $name = bitrixTgLower((string)$property["name"]);
+        foreach ($nameFragments as $fragment) {
+            if ($fragment !== "" && strpos($name, bitrixTgLower($fragment)) !== false) {
+                return $property;
+            }
+        }
+    }
+
+    return null;
+}
+
+function bitrixTgExtractPhotos(array $properties, array $fields): array
+{
+    $photoProperty = bitrixTgFindProperty(
+        $properties,
+        ["photos", "photo", "more_photo", "pictures", "images"],
+        ["Фото", "Фотографии", "Изображения", "Картинки"]
+    );
+    $fileIds = [];
+
+    if ($photoProperty) {
+        foreach ($photoProperty["rows"] as $row) {
+            $value = $row["VALUE"] ?? null;
+            if (is_array($value)) {
+                foreach ($value as $item) {
+                    $fileIds[] = $item;
+                }
+            } else {
+                $fileIds[] = $value;
+            }
+        }
+    }
+
+    if (!$fileIds) {
+        $fileIds[] = $fields["PREVIEW_PICTURE"] ?? null;
+        $fileIds[] = $fields["DETAIL_PICTURE"] ?? null;
+    }
+
+    $photos = [];
+    foreach ($fileIds as $fileId) {
+        $photo = bitrixTgFilePhoto($fileId);
+        if ($photo) {
+            $photos[] = $photo;
+        }
+    }
+
+    return $photos;
+}
+
+function bitrixTgFilePhoto($fileId): ?array
+{
+    $id = (int)$fileId;
+    if ($id <= 0) {
+        return null;
+    }
+
+    $file = \CFile::GetFileArray($id);
+    if (!$file || empty($file["SRC"])) {
+        return [
+            "id" => (string)$id,
+        ];
+    }
+
+    $path = (string)$file["SRC"];
+
+    return [
+        "id" => (string)$id,
+        "url" => bitrixTgAbsoluteUrl($path),
+        "path" => $path,
+    ];
+}
+
+function bitrixTgPropertyTruthy(?array $property): bool
+{
+    if (!$property) {
+        return false;
+    }
+
+    foreach ($property["rows"] as $row) {
+        if (bitrixTgTruthy($row["VALUE_ENUM"] ?? null) || bitrixTgTruthy($row["VALUE_XML_ID"] ?? null) || bitrixTgTruthy($row["VALUE"] ?? null)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function bitrixTgPropertyDisplayValue(?array $property): ?string
+{
+    if (!$property) {
+        return null;
+    }
+
+    foreach ($property["rows"] as $row) {
+        $value = bitrixTgRowDisplayValue($row);
+        if (!bitrixTgIsEmptyValue($value)) {
+            return is_array($value) ? implode(", ", array_map("strval", $value)) : (string)$value;
+        }
+    }
+
+    return null;
+}
+
+function bitrixTgRowDisplayValue(array $row)
+{
+    foreach (["VALUE_ENUM", "VALUE_XML_ID", "VALUE"] as $field) {
+        if (!bitrixTgIsEmptyValue($row[$field] ?? null)) {
+            return $row[$field];
+        }
+    }
+
+    return null;
+}
+
+function bitrixTgTruthy($value): bool
+{
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            if (bitrixTgTruthy($item)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if (is_bool($value)) {
+        return $value;
+    }
+
+    if (is_numeric($value)) {
+        return (float)$value !== 0.0;
+    }
+
+    $text = bitrixTgLower(trim((string)$value));
+    if ($text === "") {
+        return false;
+    }
+
+    return !in_array($text, ["0", "n", "no", "нет", "false", "off", "unchecked"], true);
+}
+
+function bitrixTgIsEmptyValue($value): bool
+{
+    if ($value === null || $value === false) {
+        return true;
+    }
+
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            if (!bitrixTgIsEmptyValue($item)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    return trim((string)$value) === "";
+}
+
+function bitrixTgAbsoluteUrl(string $path): string
+{
+    $path = trim($path);
+    if ($path === "") {
+        return "";
+    }
+
+    if (preg_match("~^https?://~i", $path)) {
+        return $path;
+    }
+
+    $base = rtrim(BITRIX_TG_PUBLIC_HOST, "/");
+    if ($base === "") {
+        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+        $base = $scheme . "://" . (string)($_SERVER["HTTP_HOST"] ?? "");
+    }
+
+    return $base . "/" . ltrim($path, "/");
+}
+
+function bitrixTgWriteDebugPayload(array $payload): void
+{
+    if (!BITRIX_TG_DEBUG_LAST_PAYLOAD || empty($_SERVER["DOCUMENT_ROOT"])) {
+        return;
+    }
+
+    $file = rtrim((string)$_SERVER["DOCUMENT_ROOT"], "/") . BITRIX_TG_DEBUG_PAYLOAD_PATH;
+    $dir = dirname($file);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+
+    @file_put_contents(
+        $file,
+        json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)
+    );
+}
+
+function bitrixTgPostJson(string $url, array $payload, string $secret = ""): void
+{
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        AddMessage2Log("Cannot encode bitrix-tg payload", "bitrix-tg");
+        return;
+    }
+
+    try {
+        $http = new \Bitrix\Main\Web\HttpClient([
+            "socketTimeout" => 5,
+            "streamTimeout" => 10,
+            "disableSslVerification" => false,
+        ]);
+        $http->setHeader("Content-Type", "application/json", true);
+        $http->setHeader("Accept", "application/json", true);
+        if ($secret !== "") {
+            $http->setHeader("X-Webhook-Secret", $secret, true);
+        }
+
+        $response = $http->post($url, $json);
+        $status = (int)$http->getStatus();
+        if ($status < 200 || $status >= 300) {
+            AddMessage2Log("bitrix-tg webhook HTTP {$status}: " . bitrixTgSubstr((string)$response, 0, 500), "bitrix-tg");
+        }
+    } catch (\Throwable $error) {
+        AddMessage2Log("bitrix-tg webhook failed: " . $error->getMessage(), "bitrix-tg");
+    }
+}
+
+function bitrixTgNullableString($value): ?string
+{
+    return bitrixTgIsEmptyValue($value) ? null : (string)$value;
+}
+
+function bitrixTgNormalizeCode(string $value): string
+{
+    return strtoupper(preg_replace("/[^A-Z0-9_]/i", "", $value));
+}
+
+function bitrixTgLower(string $value): string
+{
+    return function_exists("mb_strtolower") ? mb_strtolower($value, "UTF-8") : strtolower($value);
+}
+
+function bitrixTgSubstr(string $value, int $start, int $length): string
+{
+    return function_exists("mb_substr")
+        ? mb_substr($value, $start, $length, "UTF-8")
+        : substr($value, $start, $length);
+}
