@@ -497,6 +497,7 @@ async function syncExternalTargets(
   preparedText: string
 ): Promise<{ statuses: ProcessStatus[] }> {
   const statuses: ProcessStatus[] = [];
+  const failures: string[] = [];
 
   for (const target of externalTargets()) {
     if (!event.publishTargets[target]) {
@@ -523,7 +524,8 @@ async function syncExternalTargets(
         lastError: message
       });
       await notifySocialFailure(event, deps, target, message, "publish");
-      throw new Error(message);
+      failures.push(message);
+      continue;
     }
 
     try {
@@ -558,8 +560,12 @@ async function syncExternalTargets(
         lastError: message
       });
       await notifySocialFailure(event, deps, target, message, "publish");
-      throw error;
+      failures.push(`${target.toUpperCase()}: ${message}`);
     }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(failures.join("; "));
   }
 
   return { statuses };

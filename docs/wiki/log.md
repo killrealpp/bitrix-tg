@@ -185,3 +185,13 @@ fails after Telegram has already accepted the post.
 
 Verification: `npm test` passed 149 tests in 14 files and `npm run build`
 passed.
+
+## [2026-06-30 18:40+03:00] milestone | Immediate external partial publish safety
+
+The same partial-target rule now applies to immediate/re-save processing:
+if VK publish fails, MAX is still attempted and successful MAX state is saved.
+The overall post result remains failed so the VK error is visible, but one
+external target can no longer block another target from publishing.
+
+Verification: `npm test` passed 150 tests in 14 files and `npm run build`
+passed.

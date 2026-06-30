@@ -1703,6 +1703,55 @@ describe("processBitrixEvent", () => {
     });
   });
 
+  it("continues publishing MAX when VK publish fails and stores the VK error", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const vk = new FakeExternalPublisher("vk");
+    const max = new FakeExternalPublisher("max");
+    const adminNotifier = new FakeMissingScheduleTimeAdminNotifier();
+    vk.failPublish = new Error("VK access token was given to another ip address");
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 47,
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "Y"
+        },
+        name: "Partial external publish"
+      }
+    });
+
+    const result = await processBitrixEvent(event, {
+      db,
+      telegram,
+      externalPublishers: { vk, max },
+      adminNotifier
+    });
+
+    expect(result.status).toBe("failed");
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
+    expect(vk.publishCalls).toHaveLength(1);
+    expect(max.publishCalls).toHaveLength(1);
+    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
+      status: "failed",
+      lastError: "VK access token was given to another ip address"
+    });
+    expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
+      status: "published"
+    });
+    expect(adminNotifier.socialPublicationCalls).toEqual([
+      {
+        bitrixId: 47,
+        target: "vk",
+        error: "VK access token was given to another ip address",
+        action: "publish"
+      }
+    ]);
+  });
+
   it("deletes unchecked social targets while keeping still-selected targets", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
