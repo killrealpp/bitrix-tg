@@ -173,3 +173,15 @@ removes the old `/local/bitrix_tg_last_payload.json` file if it exists.
 
 Verification: `npm test` passed 148 tests in 14 files and `npm run build`
 passed.
+
+## [2026-06-30 18:35+03:00] milestone | Scheduled partial target retry safety
+
+Production scheduled multi-social run showed Telegram could be sent before a
+VK/MAX failure caused the whole due post to be marked failed for retry. The
+scheduled worker now persists successful Telegram refs immediately, reuses them
+on retry, records failed external target state separately, and retries only
+missing external targets. This prevents duplicate Telegram sends when VK or MAX
+fails after Telegram has already accepted the post.
+
+Verification: `npm test` passed 149 tests in 14 files and `npm run build`
+passed.

@@ -3,7 +3,13 @@ import {
   hasUnresolvedPhotos,
   type BitrixPhotoResolver
 } from "../bitrix/photoResolver";
-import type { DbGateway, PublicationKind, StoredBitrixPost } from "../db/DbGateway";
+import type {
+  DbGateway,
+  PublicationKind,
+  StoredBitrixPost,
+  StoredSocialPublication,
+  StoredTelegramMessage
+} from "../db/DbGateway";
 import {
   fitForMaxText,
   fitForTelegramCaption,
@@ -169,33 +175,13 @@ async function publishStoredPostToTargets(
   let telegramMessages: TelegramMessageRef[] = [];
 
   if (post.publishTargets.telegram) {
-    const result = await publishStoredPost(
-      post,
-      deps.telegram,
-      sourceText,
-      post.preparedText ? undefined : deps.textFit
-    );
-    telegramKind = result.kind;
+    const result = await publishOrReuseStoredTelegram(post, deps, sourceText);
+    telegramKind = result.telegramKind;
     telegramText = result.telegramText;
-    telegramMessages = result.messages;
-    const main = telegramMessages[0];
-    if (main) {
-      await deps.db.upsertSocialPublication(post.id, {
-        target: "telegram",
-        status: "published",
-        externalId: String(main.messageId),
-        externalChatId: main.chatId,
-        publicationKind: telegramKind,
-        sentText: telegramText,
-        photos: post.photos,
-        payloadHash: post.payloadHash,
-        lastError: null,
-        publishedAt: deps.now ?? new Date(),
-        deletedAt: null
-      });
-    }
+    telegramMessages = result.telegramMessages;
   }
 
+  const failures: string[] = [];
   for (const target of externalTargets()) {
     if (!post.publishTargets[target]) {
       continue;
@@ -208,29 +194,42 @@ async function publishStoredPostToTargets(
 
     const publisher = deps.externalPublishers?.[target];
     if (!publisher) {
-      throw new Error(`${target.toUpperCase()} publisher is not configured`);
+      const message = `${target.toUpperCase()} publisher is not configured`;
+      await recordScheduledExternalFailure(post, deps, target, message);
+      failures.push(message);
+      continue;
     }
 
-    const text = target === "max" ? await fitForMaxText(sourceText) : await fitForVkPost(sourceText);
-    const result = await publisher.publish({
-      bitrixId: post.bitrixId,
-      text,
-      photos: post.photos,
-      payloadHash: post.payloadHash
-    });
-    await deps.db.upsertSocialPublication(post.id, {
-      target,
-      status: "published",
-      externalId: result.externalId,
-      externalChatId: result.externalChatId ?? null,
-      publicationKind: result.publicationKind,
-      sentText: result.sentText,
-      photos: result.photos,
-      payloadHash: post.payloadHash,
-      lastError: null,
-      publishedAt: deps.now ?? new Date(),
-      deletedAt: null
-    });
+    try {
+      const text = target === "max" ? await fitForMaxText(sourceText) : await fitForVkPost(sourceText);
+      const result = await publisher.publish({
+        bitrixId: post.bitrixId,
+        text,
+        photos: post.photos,
+        payloadHash: post.payloadHash
+      });
+      await deps.db.upsertSocialPublication(post.id, {
+        target,
+        status: "published",
+        externalId: result.externalId,
+        externalChatId: result.externalChatId ?? null,
+        publicationKind: result.publicationKind,
+        sentText: result.sentText,
+        photos: result.photos,
+        payloadHash: post.payloadHash,
+        lastError: null,
+        publishedAt: deps.now ?? new Date(),
+        deletedAt: null
+      });
+    } catch (error) {
+      const message = redactErrorMessage(error);
+      await recordScheduledExternalFailure(post, deps, target, message);
+      failures.push(`${target.toUpperCase()}: ${message}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(failures.join("; "));
   }
 
   return {
@@ -238,6 +237,134 @@ async function publishStoredPostToTargets(
     telegramText,
     telegramMessages
   };
+}
+
+async function publishOrReuseStoredTelegram(
+  post: StoredBitrixPost,
+  deps: RunDuePostsDeps,
+  sourceText: string
+): Promise<{
+  telegramKind: PublicationKind | null;
+  telegramText: string | null;
+  telegramMessages: TelegramMessageRef[];
+}> {
+  const existing = await deps.db.findSocialPublication(post.id, "telegram");
+  if (existing?.status === "published" && existing.externalId && existing.externalChatId) {
+    const messages = await deps.db.listTelegramMessages(post.id);
+    const telegramMessages =
+      messages.length > 0
+        ? messages.map(toTelegramMessageRef)
+        : [telegramMessageFromPublication(existing)];
+
+    return {
+      telegramKind: existing.publicationKind ?? post.publicationKind,
+      telegramText: existing.sentText ?? post.telegramText,
+      telegramMessages
+    };
+  }
+
+  const result = await publishStoredPost(
+    post,
+    deps.telegram,
+    sourceText,
+    post.preparedText ? undefined : deps.textFit
+  );
+  const main = result.messages[0];
+  if (main) {
+    await deps.db.upsertSocialPublication(post.id, {
+      target: "telegram",
+      status: "published",
+      externalId: String(main.messageId),
+      externalChatId: main.chatId,
+      publicationKind: result.kind,
+      sentText: result.telegramText,
+      photos: post.photos,
+      payloadHash: post.payloadHash,
+      lastError: null,
+      publishedAt: deps.now ?? new Date(),
+      deletedAt: null
+    });
+    await deps.db.updatePost(post.id, {
+      chatId: main.chatId,
+      mainMessageId: main.messageId,
+      publicationKind: result.kind,
+      telegramText: result.telegramText,
+      photos: post.photos,
+      lastError: null,
+      adminNotifiedAt: null
+    });
+    await deps.db.replaceTelegramMessages(
+      post.id,
+      result.messages.map((message) => ({
+        chatId: message.chatId,
+        tgMessageId: message.messageId,
+        role: message.role,
+        mediaIndex: message.mediaIndex ?? null,
+        mediaUrl: message.mediaUrl ?? null,
+        telegramFileId: message.telegramFileId ?? null
+      }))
+    );
+  }
+
+  return {
+    telegramKind: result.kind,
+    telegramText: result.telegramText,
+    telegramMessages: result.messages
+  };
+}
+
+function toTelegramMessageRef(message: StoredTelegramMessage): TelegramMessageRef {
+  return {
+    chatId: message.chatId,
+    messageId: message.tgMessageId,
+    role: message.role,
+    mediaIndex: message.mediaIndex ?? undefined,
+    mediaUrl: message.mediaUrl ?? undefined,
+    telegramFileId: message.telegramFileId ?? undefined
+  };
+}
+
+function telegramMessageFromPublication(
+  publication: StoredSocialPublication
+): TelegramMessageRef {
+  return {
+    chatId: publication.externalChatId ?? "",
+    messageId: Number(publication.externalId),
+    role: telegramRoleForPublicationKind(publication.publicationKind),
+    mediaIndex: publication.publicationKind === "media_group" ? 0 : undefined,
+    mediaUrl: publication.photos[0]?.url
+  };
+}
+
+function telegramRoleForPublicationKind(
+  publicationKind: PublicationKind | null
+): TelegramMessageRef["role"] {
+  if (publicationKind === "photo") {
+    return "photo";
+  }
+
+  if (publicationKind === "media_group") {
+    return "album_item";
+  }
+
+  return "text";
+}
+
+async function recordScheduledExternalFailure(
+  post: StoredBitrixPost,
+  deps: RunDuePostsDeps,
+  target: ExternalSocialTarget,
+  message: string
+): Promise<void> {
+  await deps.db.upsertSocialPublication(post.id, {
+    target,
+    status: "failed",
+    photos: post.photos,
+    payloadHash: post.payloadHash,
+    lastError: message,
+    publishedAt: null,
+    deletedAt: null
+  });
 }
 
 async function publishStoredPost(
