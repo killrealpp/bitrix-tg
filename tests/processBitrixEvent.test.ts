@@ -307,7 +307,7 @@ describe("processBitrixEvent", () => {
 
     expect(result.status).toBe("edited");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText", "editText"]);
-    expect(db.posts[0].telegramText).toBe("Second");
+    expect(db.posts[0].telegramText).toBe("✨ Second");
   });
 
   it("publishes a new one-photo post through sendPhoto", async () => {
@@ -714,7 +714,7 @@ describe("processBitrixEvent", () => {
       "sendPhoto",
       "editCaption"
     ]);
-    expect(db.posts[0].telegramText).toBe("Updated caption");
+    expect(db.posts[0].telegramText).toBe("✨ Updated caption");
   });
 
   it("edits an album caption when only album text changes", async () => {
@@ -751,7 +751,7 @@ describe("processBitrixEvent", () => {
       "sendMediaGroup",
       "editCaption"
     ]);
-    expect(db.posts[0].telegramText).toBe("Updated album caption");
+    expect(db.posts[0].telegramText).toBe("✨ Updated album caption");
     expect(db.messages).toHaveLength(2);
   });
 
@@ -1194,7 +1194,7 @@ describe("processBitrixEvent", () => {
       "sendMediaGroup"
     ]);
     expect(db.posts[0].publicationKind).toBe("media_group");
-    expect(db.posts[0].telegramText).toBe("Old soft mixed updated");
+    expect(db.posts[0].telegramText).toBe("✨ Old soft mixed updated");
     expect(db.messages.map((message) => message.role)).toEqual([
       "album_item",
       "album_item"
@@ -1255,7 +1255,7 @@ describe("processBitrixEvent", () => {
       "sendText"
     ]);
     expect(db.posts[0].publicationKind).toBe("text");
-    expect(db.posts[0].telegramText).toBe("Mixed cleanup no photos");
+    expect(db.posts[0].telegramText).toBe("✨ Mixed cleanup no photos");
     expect(db.messages.map((message) => message.role)).toEqual(["text"]);
   });
 
@@ -1387,7 +1387,7 @@ describe("processBitrixEvent", () => {
       "sendPhoto",
       "editText"
     ]);
-    expect(db.posts[0].telegramText).toBe("Text changed");
+    expect(db.posts[0].telegramText).toBe("✨ Text changed");
   });
 
   it("marks a new post as failed if Telegram rejects the first publication", async () => {
@@ -1565,6 +1565,69 @@ describe("processBitrixEvent", () => {
     ]);
   });
 
+  it("formats unknown multi-photo posts with AI and publishes them to all selected targets", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const vk = new FakeExternalPublisher("vk");
+    const max = new FakeExternalPublisher("max");
+    const aiCalls: unknown[] = [];
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 48,
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "Y"
+        },
+        post_type: "Другой тип",
+        name: "Веселый пост",
+        detail_text: "строка 1\n\nстрока 2",
+        all_properties: {
+          PHOTOS: productionPhotos()
+        }
+      }
+    });
+
+    const result = await processBitrixEvent(event, {
+      db,
+      telegram,
+      externalPublishers: { vk, max },
+      textFit: {
+        aiPrepare: async (request) => {
+          aiCalls.push(request);
+          return "✨ Строка 1\n\nСтрока 2";
+        }
+      }
+    });
+
+    expect(result.status).toBe("published");
+    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0]).toMatchObject({
+      postType: "unknown",
+      target: 1000
+    });
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(telegram.calls[0].input).toMatchObject({
+      caption: "✨ Строка 1\n\nСтрока 2",
+      photos: productionPhotos()
+    });
+    expect(vk.publishCalls[0]).toMatchObject({
+      text: "✨ Строка 1\n\nСтрока 2",
+      photos: productionPhotos()
+    });
+    expect(max.publishCalls[0]).toMatchObject({
+      text: "✨ Строка 1\n\nСтрока 2",
+      photos: productionPhotos()
+    });
+    expect(db.posts[0]).toMatchObject({
+      preparedText: "✨ Строка 1\n\nСтрока 2",
+      postType: "unknown",
+      publicationKind: "media_group"
+    });
+  });
+
   it("does not duplicate Telegram, VK, or MAX on identical repeated webhooks", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
@@ -1649,7 +1712,7 @@ describe("processBitrixEvent", () => {
     expect(vk.publishCalls).toHaveLength(1);
     expect(max.publishCalls).toHaveLength(1);
     expect(db.socialPublications.find((item) => item.target === "vk")?.sentText).toBe(
-      "First social text"
+      "✨ First social text"
     );
   });
 

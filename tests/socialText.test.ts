@@ -7,7 +7,9 @@ describe("prepareSocialText", () => {
   it.each([
     ["event", "event"],
     ["promo", "promo"],
-    ["company news", "company_news"]
+    ["company news", "company_news"],
+    ["entertainment", "entertainment"],
+    ["unknown", "unknown"]
   ] satisfies Array<[string, PostType]>)(
     "calls AI preparation for %s posts",
     async (_label, postType) => {
@@ -32,18 +34,18 @@ describe("prepareSocialText", () => {
     ["entertainment", "entertainment"],
     ["unknown", "unknown"]
   ] satisfies Array<[string, PostType]>)(
-    "does not call AI preparation for %s posts",
+    "falls back to light formatting for %s posts when AI is unavailable",
     async (_label, postType) => {
       const calls: unknown[] = [];
       const text = await prepareSocialText(eventWithPostType(postType), "Line 1\n\nLine 2", {
         aiPrepare: async (request) => {
           calls.push(request);
-          return "AI should not run";
+          throw new Error("AI unavailable");
         }
       });
 
-      expect(calls).toHaveLength(0);
-      expect(text).toBe(postType === "entertainment" ? "✨ Line 1\n\nLine 2" : "Line 1\n\nLine 2");
+      expect(calls).toHaveLength(1);
+      expect(text).toBe("✨ Line 1\n\nLine 2");
     }
   );
 

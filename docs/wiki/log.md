@@ -233,3 +233,19 @@ images. VK and Telegram remain unchanged.
 
 Verification: `npm test` passed 155 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-01 13:16+03:00] milestone | Format-only AI prompt for other post types
+
+The text preparation rule was corrected: `entertainment`, `unknown`, and any
+other non-business post type should still call OpenRouter when configured, but
+with a format-only prompt. This prompt must preserve the original meaning and
+facts, avoid turning the text into an event/promo/company-news post, and only add
+light structure plus 1-3 relevant emoji. If AI is unavailable, deterministic
+fallback formatting treats unknown types as light/entertainment-style content.
+
+Regression coverage now proves that all post types call `aiPrepare`, unknown
+types use the format-only OpenRouter prompt, and an unknown multi-photo post is
+published to Telegram/VK/MAX with the prepared text and all photos.
+
+Verification: `npm test` passed 159 tests in 14 files and `npm run build`
+passed.

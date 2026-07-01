@@ -1,3 +1,5 @@
+import type { PostType } from "../bitrix/parseWebhook";
+
 export const TELEGRAM_TEXT_LIMIT = 4096;
 export const TELEGRAM_CAPTION_LIMIT = 1024;
 export const TELEGRAM_TEXT_TARGET = 3900;
@@ -12,7 +14,7 @@ export interface TextFitRequest {
 
 export interface SocialTextPrepareRequest {
   text: string;
-  postType: "event" | "promo" | "company_news";
+  postType: PostType;
   target: number;
   title: string;
   previewText: string;

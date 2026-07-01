@@ -168,5 +168,8 @@ Post type controls text preparation:
 
 - `event`, `promo`, `company_news` call OpenRouter with the matching SMM prompt
   and target a post up to 1000 characters;
-- `entertainment` and `unknown` skip AI and use deterministic formatting;
+- `entertainment`, `unknown`, and any other non-business type call OpenRouter
+  with a format-only prompt: preserve meaning and facts, add light structure and
+  1-3 relevant emoji, and do not turn the text into a sale/event/company-news
+  post;
 - all platform limits are enforced after preparation.

@@ -3,11 +3,8 @@ import { truncateAtWord, type TextFitOptions } from "./fitText";
 
 export const SOCIAL_AI_TARGET = 1000;
 
-export function shouldUseAiPrompt(postType: PostType): postType is
-  | "event"
-  | "promo"
-  | "company_news" {
-  return postType === "event" || postType === "promo" || postType === "company_news";
+export function shouldUseAiPrompt(_postType: PostType): boolean {
+  return true;
 }
 
 export async function prepareSocialText(
@@ -85,6 +82,6 @@ function markerForPostType(postType: PostType): string {
     case "entertainment":
       return "✨";
     default:
-      return "";
+      return "✨";
   }
 }

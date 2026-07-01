@@ -266,9 +266,9 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: One queue keeps SQLite state, retry, admin notifications, and duplicate prevention consistent across Telegram, VK, and MAX.
   Date/Author: 2026-06-26 / Codex
 
-- Decision: Run SMM prompt preparation for `event`, `promo`, and `company_news`, but skip AI for `entertainment` and `unknown`.
-  Rationale: The user provided separate prompts for the three business post types and explicitly asked not to AI-process entertainment or unknown types beyond formatting/emoji.
-  Date/Author: 2026-06-26 / User
+- Decision: Run AI preparation for every post type, with different prompt modes.
+  Rationale: `event`, `promo`, and `company_news` use their business SMM prompts. `entertainment`, `unknown`, and any other non-business type use a format-only prompt that preserves the original meaning/facts and only adds light structure plus 1-3 relevant emoji.
+  Date/Author: 2026-07-01 / User
 
 ## Outcomes & Retrospective
 

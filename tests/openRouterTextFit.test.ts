@@ -101,4 +101,51 @@ describe("OpenRouterTextFitter", () => {
       })
     ).rejects.not.toThrow("openrouter-secret");
   });
+
+  it("uses a format-only prompt for unknown social post types", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "✨ Аккуратно оформленный текст"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+    const fitter = new OpenRouterTextFitter({
+      apiKey: "openrouter-secret",
+      model: "openai/gpt-4.1-mini",
+      fetchImpl: fetchMock
+    });
+
+    const result = await fitter.prepareSocialPost({
+      text: "Обычный текст без категории",
+      postType: "unknown",
+      target: 1000,
+      title: "Заголовок",
+      previewText: "",
+      detailText: "Обычный текст без категории",
+      scheduledAtRawValue: null,
+      url: ""
+    });
+
+    expect(result).toBe("✨ Аккуратно оформленный текст");
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    const userMessage = body.messages.find(
+      (message: { role: string }) => message.role === "user"
+    );
+    expect(userMessage.content).toContain("Легкое оформление");
+    expect(userMessage.content).toContain("Не переписывай текст как акцию");
+    expect(userMessage.content).not.toContain("Новость компании");
+  });
 });
