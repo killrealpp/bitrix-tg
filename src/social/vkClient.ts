@@ -38,7 +38,8 @@ interface VkWallUploadServerResponse {
 
 interface VkWallUploadResponse {
   server: number;
-  photo: string;
+  photo?: string;
+  photos_list?: string;
   hash: string;
 }
 
@@ -136,7 +137,7 @@ export class VkClient implements ExternalSocialPublisher {
       {
         group_id: this.options.groupId,
         server: String(uploadResponse.server),
-        photo: uploadResponse.photo,
+        photo: getUploadedPhotoPayload(uploadResponse),
         hash: uploadResponse.hash
       },
       this.options.userAccessToken
@@ -198,4 +199,13 @@ export class VkClient implements ExternalSocialPublisher {
 
     return data;
   }
+}
+
+function getUploadedPhotoPayload(uploadResponse: VkWallUploadResponse): string {
+  const payload = uploadResponse.photo ?? uploadResponse.photos_list;
+  if (!payload) {
+    throw new Error("VK wall photo upload response did not include photo payload");
+  }
+
+  return payload;
 }

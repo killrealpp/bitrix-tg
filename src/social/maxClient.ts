@@ -159,25 +159,44 @@ export class MaxClient implements ExternalSocialPublisher {
   }
 
   private async requestJson<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(`${this.apiBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        authorization: this.options.token,
-        ...(init.headers ?? {})
-      }
-    });
+    const url = `${this.apiBaseUrl}${path}`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        ...init,
+        headers: {
+          authorization: this.options.token,
+          ...(init.headers ?? {})
+        }
+      });
+    } catch (error) {
+      throw new Error(
+        `MAX ${path} fetch failed: ${redactSensitiveText(getErrorMessage(error), [
+          this.options.token
+        ])}`
+      );
+    }
 
     return this.parseResponse<T>(response, path);
   }
 
   private async fetchUpload<T>(url: string, init: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(url, {
-      ...init,
-      headers: {
-        authorization: this.options.token,
-        ...(init.headers ?? {})
-      }
-    });
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        ...init,
+        headers: {
+          authorization: this.options.token,
+          ...(init.headers ?? {})
+        }
+      });
+    } catch (error) {
+      throw new Error(
+        `MAX upload fetch failed: ${redactSensitiveText(getErrorMessage(error), [
+          this.options.token
+        ])}`
+      );
+    }
 
     return this.parseResponse<T>(response, "upload");
   }
@@ -261,6 +280,15 @@ function extractErrorMessage(data: unknown): string {
   }
 
   return "unknown error";
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = error.cause instanceof Error ? `: ${error.cause.message}` : "";
+    return `${error.message}${cause}`;
+  }
+
+  return String(error);
 }
 
 function isAttachmentNotReady(data: unknown): boolean {

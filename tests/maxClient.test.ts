@@ -185,6 +185,26 @@ describe("MaxClient", () => {
     expect(sleepCalls).toEqual([1000]);
   });
 
+  it("adds operation context and redacts token when fetch fails", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch failed with max-secret");
+    });
+    const client = new MaxClient({
+      token: "max-secret",
+      chatId: "max-chat",
+      fetchImpl: fetchMock
+    });
+
+    await expect(
+      client.publish({
+        bitrixId: 4,
+        text: "Hello MAX",
+        photos: [],
+        payloadHash: "hash"
+      })
+    ).rejects.toThrow("MAX /messages?chat_id=max-chat fetch failed: fetch failed with [redacted]");
+  });
+
   it("deletes a MAX message", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ success: true }));
     const client = new MaxClient({

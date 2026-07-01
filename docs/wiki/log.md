@@ -195,3 +195,18 @@ external target can no longer block another target from publishing.
 
 Verification: `npm test` passed 150 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-01 11:45+03:00] milestone | VK photos_list upload and MAX fetch diagnostics
+
+Production VK photo publishing reached `photos.saveWallPhoto` and failed with
+`photos_list is invalid`. The VK client now accepts both upload response shapes:
+`photo` and `photos_list`, then passes the available payload to
+`photos.saveWallPhoto`.
+
+MAX failures previously collapsed to the unhelpful `fetch failed`. MAX client
+network errors now include the operation path (`/uploads`, upload URL, or
+`/messages`) while still redacting the bot token, so the next production retry
+will show where the MAX request actually fails.
+
+Verification: `npm test` passed 152 tests in 14 files and `npm run build`
+passed.

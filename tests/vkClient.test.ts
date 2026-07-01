@@ -142,6 +142,73 @@ describe("VkClient", () => {
     );
   });
 
+  it("accepts photos_list wall upload responses before saving wall photos", async () => {
+    const saveWallPhotoBodies: URLSearchParams[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/photos.getWallUploadServer")) {
+        return jsonResponse({
+          response: {
+            upload_url: "https://vk-upload/photos-list"
+          }
+        });
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url === "https://vk-upload/photos-list") {
+        return jsonResponse({
+          server: 1,
+          photos_list: "[{\"photo\":\"payload\"}]",
+          hash: "hash"
+        });
+      }
+
+      if (url.endsWith("/photos.saveWallPhoto")) {
+        saveWallPhotoBodies.push(bodyParams(init));
+        return jsonResponse({
+          response: [
+            {
+              owner_id: -123,
+              id: 601
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/wall.post")) {
+        return jsonResponse({
+          response: {
+            post_id: 203
+          }
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock
+    });
+
+    await client.publish({
+      bitrixId: 4,
+      text: "VK photo",
+      photos: [
+        {
+          url: "https://example.com/photo.jpg"
+        }
+      ],
+      payloadHash: "hash"
+    });
+
+    expect(saveWallPhotoBodies[0].get("photo")).toBe("[{\"photo\":\"payload\"}]");
+  });
+
   it("requires VK_ACCESS_TOKEN to upload wall photos", async () => {
     const client = new VkClient({
       communityToken: "community-token",
