@@ -249,3 +249,14 @@ published to Telegram/VK/MAX with the prepared text and all photos.
 
 Verification: `npm test` passed 159 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-01 15:02+03:00] milestone | VK photo upload transient retry
+
+Production scheduled post `181846` published to Telegram and MAX with two
+photos, but the overall row stayed `failed` because VK photo upload returned
+HTTP `504`. The VK client now retries transient wall photo upload failures:
+network errors, HTTP `429`, and HTTP `5xx`. Permanent upload failures such as
+HTTP `400` still fail immediately.
+
+Verification: `npm test` passed 161 tests in 14 files and `npm run build`
+passed.

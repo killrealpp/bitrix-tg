@@ -17,7 +17,10 @@ export interface VkClientOptions {
   postAsGroup?: boolean;
   apiBaseUrl?: string;
   photoDownloadTimeoutMs?: number;
+  uploadRetryAttempts?: number;
+  uploadRetryDelayMs?: number;
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface VkApiResponse<T> {
@@ -54,7 +57,10 @@ export class VkClient implements ExternalSocialPublisher {
   private readonly apiBaseUrl: string;
   private readonly apiVersion: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
   private readonly photoDownloadTimeoutMs: number;
+  private readonly uploadRetryAttempts: number;
+  private readonly uploadRetryDelayMs: number;
 
   constructor(private readonly options: VkClientOptions) {
     this.apiBaseUrl = (options.apiBaseUrl ?? "https://api.vk.com/method").replace(
@@ -63,7 +69,10 @@ export class VkClient implements ExternalSocialPublisher {
     );
     this.apiVersion = options.apiVersion ?? "5.199";
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.sleep = options.sleep ?? sleep;
     this.photoDownloadTimeoutMs = Math.max(1, options.photoDownloadTimeoutMs ?? 15_000);
+    this.uploadRetryAttempts = Math.max(1, options.uploadRetryAttempts ?? 3);
+    this.uploadRetryDelayMs = Math.max(0, options.uploadRetryDelayMs ?? 1000);
   }
 
   async publish(input: ExternalPublishInput): Promise<ExternalPublishResult> {
@@ -196,16 +205,43 @@ export class VkClient implements ExternalSocialPublisher {
   }
 
   private async fetchUpload<T>(url: string, body: FormData): Promise<T> {
-    const response = await this.fetchImpl(url, {
-      method: "POST",
-      body
-    });
-    const data = (await response.json().catch(() => ({}))) as T;
-    if (!response.ok) {
-      throw new Error(`VK photo upload failed with HTTP ${response.status}`);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.uploadRetryAttempts; attempt += 1) {
+      try {
+        const response = await this.fetchImpl(url, {
+          method: "POST",
+          body
+        });
+        const data = (await response.json().catch(() => ({}))) as T;
+        if (response.ok) {
+          return data;
+        }
+
+        const error = new VkUploadHttpError(response.status);
+        if (!isRetriableUploadError(error) || attempt === this.uploadRetryAttempts) {
+          throw error;
+        }
+
+        lastError = error;
+      } catch (error) {
+        if (!isRetriableUploadError(error) || attempt === this.uploadRetryAttempts) {
+          throw normalizeUploadError(error);
+        }
+
+        lastError = error;
+      }
+
+      await this.sleep(this.uploadRetryDelayMs * attempt);
     }
 
-    return data;
+    throw normalizeUploadError(lastError);
+  }
+}
+
+class VkUploadHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`VK photo upload failed with HTTP ${status}`);
+    this.name = "VkUploadHttpError";
   }
 }
 
@@ -285,4 +321,26 @@ function summarizeVkUploadResponse(uploadResponse: VkWallUploadResponse): string
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isRetriableUploadError(error: unknown): boolean {
+  if (error instanceof VkUploadHttpError) {
+    return error.status === 429 || error.status >= 500;
+  }
+
+  return true;
+}
+
+function normalizeUploadError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(String(error));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

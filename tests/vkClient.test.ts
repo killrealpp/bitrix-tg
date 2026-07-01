@@ -321,6 +321,130 @@ describe("VkClient", () => {
     );
   });
 
+  it("retries transient wall photo upload failures", async () => {
+    let uploadAttempts = 0;
+    const sleepCalls: number[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/photos.getWallUploadServer")) {
+        return jsonResponse({
+          response: {
+            upload_url: "https://vk-upload/transient"
+          }
+        });
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url === "https://vk-upload/transient") {
+        uploadAttempts += 1;
+        expect(init?.body).toBeInstanceOf(FormData);
+        return uploadAttempts === 1
+          ? jsonResponse({}, 504)
+          : jsonResponse({
+              server: 1,
+              photo: "photo-json",
+              hash: "hash"
+            });
+      }
+
+      if (url.endsWith("/photos.saveWallPhoto")) {
+        return jsonResponse({
+          response: [
+            {
+              owner_id: -123,
+              id: 701
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/wall.post")) {
+        return jsonResponse({
+          response: {
+            post_id: 204
+          }
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock,
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+      }
+    });
+
+    const result = await client.publish({
+      bitrixId: 7,
+      text: "VK retry photo",
+      photos: [
+        {
+          url: "https://example.com/photo.jpg"
+        }
+      ],
+      payloadHash: "hash"
+    });
+
+    expect(result.externalId).toBe("204");
+    expect(uploadAttempts).toBe(2);
+    expect(sleepCalls).toEqual([1000]);
+  });
+
+  it("does not retry permanent wall photo upload failures", async () => {
+    let uploadAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/photos.getWallUploadServer")) {
+        return jsonResponse({
+          response: {
+            upload_url: "https://vk-upload/permanent"
+          }
+        });
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url === "https://vk-upload/permanent") {
+        uploadAttempts += 1;
+        return jsonResponse({}, 400);
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock,
+      sleep: async () => {
+        throw new Error("sleep should not be called");
+      }
+    });
+
+    await expect(
+      client.publish({
+        bitrixId: 8,
+        text: "VK bad photo",
+        photos: [
+          {
+            url: "https://example.com/photo.jpg"
+          }
+        ],
+        payloadHash: "hash"
+      })
+    ).rejects.toThrow("VK photo upload failed with HTTP 400");
+    expect(uploadAttempts).toBe(1);
+  });
+
   it("requires VK_ACCESS_TOKEN to upload wall photos", async () => {
     const client = new VkClient({
       communityToken: "community-token",
