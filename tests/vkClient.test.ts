@@ -90,7 +90,7 @@ describe("VkClient", () => {
       }
 
       if (url.startsWith("https://vk-upload/")) {
-        expect(init?.body).toBeInstanceOf(FormData);
+        expectVkMultipartUpload(init);
         const server = Number(url.split("/").at(-1));
         return jsonResponse({
           server,
@@ -142,6 +142,10 @@ describe("VkClient", () => {
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
       "https://example.com/photo%20one.jpg"
     );
+    const firstUpload = fetchMock.mock.calls.find((call) =>
+      String(call[0]).startsWith("https://vk-upload/")
+    );
+    expect(uploadBodyText(firstUpload?.[1])).toContain('filename="photo one.jpg"');
   });
 
   it("accepts photos_list wall upload responses before saving wall photos", async () => {
@@ -289,7 +293,7 @@ describe("VkClient", () => {
 
       if (url.startsWith("https://vk-upload/payload-")) {
         uploadAttempts += 1;
-        expect(init?.body).toBeInstanceOf(FormData);
+        expectVkMultipartUpload(init);
         return uploadAttempts === 1
           ? jsonResponse({
               server: 906218,
@@ -427,7 +431,7 @@ describe("VkClient", () => {
 
       if (url === "https://vk-upload/transient") {
         uploadAttempts += 1;
-        expect(init?.body).toBeInstanceOf(FormData);
+        expectVkMultipartUpload(init);
         return uploadAttempts === 1
           ? jsonResponse({}, 504)
           : jsonResponse({
@@ -603,4 +607,25 @@ function imageResponse(): Response {
       "content-type": "image/jpeg"
     }
   });
+}
+
+function expectVkMultipartUpload(init?: RequestInit): void {
+  const headers = init?.headers as Record<string, string> | undefined;
+  expect(headers?.["content-type"]).toMatch(
+    /^multipart\/form-data; boundary=----bitrix-tg-vk-/
+  );
+  expect(Number(headers?.["content-length"])).toBeGreaterThan(0);
+  expect(init?.body).toBeInstanceOf(Uint8Array);
+
+  const bodyText = uploadBodyText(init);
+  expect(bodyText).toContain('Content-Disposition: form-data; name="photo";');
+  expect(bodyText).toContain("Content-Type: image/jpeg");
+}
+
+function uploadBodyText(init?: RequestInit): string {
+  if (!(init?.body instanceof Uint8Array)) {
+    return "";
+  }
+
+  return new TextDecoder().decode(init.body);
 }

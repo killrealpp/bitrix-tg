@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { NormalizedPhoto } from "../bitrix/parseWebhook";
 import { redactSensitiveText } from "../security/redaction";
-import { downloadPhoto } from "./photoDownload";
+import { downloadPhoto, type DownloadedPhoto } from "./photoDownload";
 import {
   publicationKindForPhotos,
   type ExternalDeleteInput,
@@ -50,6 +51,11 @@ interface VkSavedPhoto {
   owner_id: number;
   id: number;
   access_key?: string;
+}
+
+interface VkUploadBody {
+  body: NonNullable<RequestInit["body"]>;
+  headers: Record<string, string>;
 }
 
 export class VkClient implements ExternalSocialPublisher {
@@ -154,10 +160,7 @@ export class VkClient implements ExternalSocialPublisher {
   }
 
   private async uploadWallPhotoWithRetry(
-    file: {
-      blob: Blob;
-      filename: string;
-    },
+    file: DownloadedPhoto,
     userAccessToken: string
   ): Promise<{
     uploadResponse: VkWallUploadResponse;
@@ -172,11 +175,10 @@ export class VkClient implements ExternalSocialPublisher {
         },
         userAccessToken
       );
-      const form = new FormData();
-      form.append("photo", file.blob, file.filename);
+      const uploadBody = await createPhotoUploadBody(file);
       const uploadResponse = await this.fetchUpload<VkWallUploadResponse>(
         uploadServer.upload_url,
-        form
+        uploadBody
       );
 
       try {
@@ -190,8 +192,12 @@ export class VkClient implements ExternalSocialPublisher {
           }
         };
       } catch (error) {
-        if (!(error instanceof VkUploadPayloadError) || attempt === this.uploadRetryAttempts) {
+        if (!(error instanceof VkUploadPayloadError)) {
           throw error;
+        }
+
+        if (attempt === this.uploadRetryAttempts) {
+          throw new Error(`${error.message}; ${summarizeDownloadedPhoto(file)}`);
         }
 
         lastError = error;
@@ -239,13 +245,14 @@ export class VkClient implements ExternalSocialPublisher {
     return data.response;
   }
 
-  private async fetchUpload<T>(url: string, body: FormData): Promise<T> {
+  private async fetchUpload<T>(url: string, upload: VkUploadBody): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.uploadRetryAttempts; attempt += 1) {
       try {
         const response = await this.fetchImpl(url, {
           method: "POST",
-          body
+          headers: upload.headers,
+          body: upload.body
         });
         const data = (await response.json().catch(() => ({}))) as T;
         if (response.ok) {
@@ -285,6 +292,62 @@ class VkUploadPayloadError extends Error {
     super(message);
     this.name = "VkUploadPayloadError";
   }
+}
+
+async function createPhotoUploadBody(file: DownloadedPhoto): Promise<VkUploadBody> {
+  const boundary = `----bitrix-tg-vk-${randomUUID().replace(/-/g, "")}`;
+  const contentType = normalizeMultipartContentType(file.contentType);
+  const header = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="photo"; filename="${escapeMultipartValue(
+      file.filename
+    )}"`,
+    `Content-Type: ${contentType}`,
+    "",
+    ""
+  ].join("\r\n");
+  const footer = `\r\n--${boundary}--\r\n`;
+  const encoder = new TextEncoder();
+  const body = concatUint8Arrays([
+    encoder.encode(header),
+    new Uint8Array(await file.blob.arrayBuffer()),
+    encoder.encode(footer)
+  ]);
+
+  return {
+    body,
+    headers: {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+      "content-length": String(body.byteLength)
+    }
+  };
+}
+
+function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return result;
+}
+
+function normalizeMultipartContentType(contentType: string): string {
+  const type = contentType.split(";")[0]?.trim().toLowerCase();
+  return type || "application/octet-stream";
+}
+
+function escapeMultipartValue(value: string): string {
+  return value.replace(/[\r\n"]/g, "_").replace(/\\/g, "_");
+}
+
+function summarizeDownloadedPhoto(file: DownloadedPhoto): string {
+  return `uploaded file: bytes=${file.blob.size}, contentType=${normalizeMultipartContentType(
+    file.contentType
+  )}, filename=${file.filename}`;
 }
 
 function getUploadedPhotoPayload(uploadResponse: VkWallUploadResponse): string {

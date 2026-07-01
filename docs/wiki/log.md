@@ -273,3 +273,18 @@ URL before failing.
 Verification: `npx vitest run tests/vkClient.test.ts --reporter=verbose` passed
 10 tests, `npm test -- --reporter=dot` passed 162 tests in 14 files, and
 `npm run build` passed.
+
+## [2026-07-01 15:25+03:00] milestone | VK manual multipart photo upload
+
+Post `181846` still received VK `photo=[]` after retrying with a fresh upload
+server, while Telegram and MAX had already published the same two-photo post.
+This points to VK not recognizing the multipart file body rather than a queue or
+target-selection bug. VK photo upload now sends a manually assembled multipart
+body with explicit `Content-Type` boundary and `Content-Length`, preserving the
+`photo` field name required by VK. If VK still returns an empty upload payload,
+the stored error will also include downloaded file diagnostics: byte size,
+content type, and filename, without exposing any URL or token.
+
+Verification: `npx vitest run tests/vkClient.test.ts --reporter=verbose` passed
+10 tests, `npm test -- --reporter=dot` passed 162 tests in 14 files, and
+`npm run build` passed.
