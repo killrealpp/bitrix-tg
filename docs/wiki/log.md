@@ -260,3 +260,16 @@ HTTP `400` still fail immediately.
 
 Verification: `npm test` passed 161 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-01 15:18+03:00] milestone | VK empty upload payload retry
+
+Production retry for post `181846` then reached VK upload successfully, but the
+upload server returned an empty photo payload (`photo=[]`) even though `server`
+and `hash` were present. Telegram and MAX had already published the same
+two-photo post, so the fix is VK-only: empty or missing VK upload payload fields
+now retry the whole wall-photo upload cycle with a fresh `photos.getWallUploadServer`
+URL before failing.
+
+Verification: `npx vitest run tests/vkClient.test.ts --reporter=verbose` passed
+10 tests, `npm test -- --reporter=dot` passed 162 tests in 14 files, and
+`npm run build` passed.

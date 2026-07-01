@@ -14,7 +14,8 @@ describe("VkClient", () => {
       communityToken: "community-token",
       userAccessToken: "user-token",
       groupId: "123",
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      uploadRetryAttempts: 1
     });
 
     const result = await client.publish({
@@ -104,7 +105,8 @@ describe("VkClient", () => {
       communityToken: "community-token",
       userAccessToken: "user-token",
       groupId: "123",
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      uploadRetryAttempts: 1
     });
 
     const result = await client.publish({
@@ -192,7 +194,8 @@ describe("VkClient", () => {
       communityToken: "community-token",
       userAccessToken: "user-token",
       groupId: "123",
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      uploadRetryAttempts: 1
     });
 
     await client.publish({
@@ -244,7 +247,8 @@ describe("VkClient", () => {
       communityToken: "community-token",
       userAccessToken: "user-token",
       groupId: "123",
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock,
+      uploadRetryAttempts: 1
     });
 
     await expect(
@@ -262,6 +266,89 @@ describe("VkClient", () => {
       "VK wall photo upload returned empty photo payload (upload response: server=7, hash=present, payloadField=photo, payloadLength=2)"
     );
     expect(methodCalls).toEqual(["photos.getWallUploadServer"]);
+  });
+
+  it("retries empty wall photo upload payloads with a fresh upload server", async () => {
+    let serverCounter = 0;
+    let uploadAttempts = 0;
+    const sleepCalls: number[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/photos.getWallUploadServer")) {
+        serverCounter += 1;
+        return jsonResponse({
+          response: {
+            upload_url: `https://vk-upload/payload-${serverCounter}`
+          }
+        });
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url.startsWith("https://vk-upload/payload-")) {
+        uploadAttempts += 1;
+        expect(init?.body).toBeInstanceOf(FormData);
+        return uploadAttempts === 1
+          ? jsonResponse({
+              server: 906218,
+              photo: "[]",
+              hash: "hash-empty"
+            })
+          : jsonResponse({
+              server: 906219,
+              photo: "photo-json",
+              hash: "hash-ok"
+            });
+      }
+
+      if (url.endsWith("/photos.saveWallPhoto")) {
+        return jsonResponse({
+          response: [
+            {
+              owner_id: -123,
+              id: 702
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/wall.post")) {
+        return jsonResponse({
+          response: {
+            post_id: 205
+          }
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock,
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+      }
+    });
+
+    const result = await client.publish({
+      bitrixId: 9,
+      text: "VK retry empty upload payload",
+      photos: [
+        {
+          url: "https://example.com/photo.jpg"
+        }
+      ],
+      payloadHash: "hash"
+    });
+
+    expect(result.externalId).toBe("205");
+    expect(serverCounter).toBe(2);
+    expect(uploadAttempts).toBe(2);
+    expect(sleepCalls).toEqual([1000]);
   });
 
   it("adds wall photo upload diagnostics when saveWallPhoto fails", async () => {

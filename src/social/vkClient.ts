@@ -115,7 +115,8 @@ export class VkClient implements ExternalSocialPublisher {
   }
 
   private async uploadWallPhoto(photo: NormalizedPhoto): Promise<string> {
-    if (!this.options.userAccessToken) {
+    const userAccessToken = this.options.userAccessToken;
+    if (!userAccessToken) {
       throw new Error("VK_ACCESS_TOKEN is required to upload wall photos");
     }
 
@@ -123,36 +124,21 @@ export class VkClient implements ExternalSocialPublisher {
       throw new Error(`Cannot upload unresolved Bitrix photo id ${photo.id ?? "unknown"}`);
     }
 
-    const uploadServer = await this.callVk<VkWallUploadServerResponse>(
-      "photos.getWallUploadServer",
-      {
-        group_id: this.options.groupId
-      },
-      this.options.userAccessToken
-    );
     const file = await downloadPhoto(photo.url, {
       timeoutMs: this.photoDownloadTimeoutMs,
       fetchImpl: this.fetchImpl,
-      secrets: [this.options.communityToken, this.options.userAccessToken]
+      secrets: [this.options.communityToken, userAccessToken]
     });
-    const form = new FormData();
-    form.append("photo", file.blob, file.filename);
-    const uploadResponse = await this.fetchUpload<VkWallUploadResponse>(
-      uploadServer.upload_url,
-      form
+    const { uploadResponse, saveParams } = await this.uploadWallPhotoWithRetry(
+      file,
+      userAccessToken
     );
-    const saveParams = {
-      group_id: this.options.groupId,
-      server: getUploadedPhotoServer(uploadResponse),
-      photo: getUploadedPhotoPayload(uploadResponse),
-      hash: getUploadedPhotoHash(uploadResponse)
-    };
     let saved: VkSavedPhoto[];
     try {
       saved = await this.callVk<VkSavedPhoto[]>(
         "photos.saveWallPhoto",
         saveParams,
-        this.options.userAccessToken
+        userAccessToken
       );
     } catch (error) {
       throw new Error(
@@ -165,6 +151,55 @@ export class VkClient implements ExternalSocialPublisher {
     }
 
     return `photo${first.owner_id}_${first.id}${first.access_key ? `_${first.access_key}` : ""}`;
+  }
+
+  private async uploadWallPhotoWithRetry(
+    file: {
+      blob: Blob;
+      filename: string;
+    },
+    userAccessToken: string
+  ): Promise<{
+    uploadResponse: VkWallUploadResponse;
+    saveParams: Record<string, string>;
+  }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.uploadRetryAttempts; attempt += 1) {
+      const uploadServer = await this.callVk<VkWallUploadServerResponse>(
+        "photos.getWallUploadServer",
+        {
+          group_id: this.options.groupId
+        },
+        userAccessToken
+      );
+      const form = new FormData();
+      form.append("photo", file.blob, file.filename);
+      const uploadResponse = await this.fetchUpload<VkWallUploadResponse>(
+        uploadServer.upload_url,
+        form
+      );
+
+      try {
+        return {
+          uploadResponse,
+          saveParams: {
+            group_id: this.options.groupId,
+            server: getUploadedPhotoServer(uploadResponse),
+            photo: getUploadedPhotoPayload(uploadResponse),
+            hash: getUploadedPhotoHash(uploadResponse)
+          }
+        };
+      } catch (error) {
+        if (!(error instanceof VkUploadPayloadError) || attempt === this.uploadRetryAttempts) {
+          throw error;
+        }
+
+        lastError = error;
+        await this.sleep(this.uploadRetryDelayMs * attempt);
+      }
+    }
+
+    throw normalizeUploadError(lastError);
   }
 
   private async callVk<T>(
@@ -245,10 +280,17 @@ class VkUploadHttpError extends Error {
   }
 }
 
+class VkUploadPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VkUploadPayloadError";
+  }
+}
+
 function getUploadedPhotoPayload(uploadResponse: VkWallUploadResponse): string {
   const payload = stringifyUploadPayload(uploadResponse.photo ?? uploadResponse.photos_list);
   if (!payload || payload === "[]" || payload === "{}" || payload === "null") {
-    throw new Error(
+    throw new VkUploadPayloadError(
       `VK wall photo upload returned empty photo payload (${summarizeVkUploadResponse(
         uploadResponse
       )})`
@@ -261,7 +303,7 @@ function getUploadedPhotoPayload(uploadResponse: VkWallUploadResponse): string {
 function getUploadedPhotoServer(uploadResponse: VkWallUploadResponse): string {
   const value = uploadResponse.server;
   if (typeof value !== "string" && typeof value !== "number") {
-    throw new Error(
+    throw new VkUploadPayloadError(
       `VK wall photo upload response did not include server (${summarizeVkUploadResponse(
         uploadResponse
       )})`
@@ -274,7 +316,7 @@ function getUploadedPhotoServer(uploadResponse: VkWallUploadResponse): string {
 function getUploadedPhotoHash(uploadResponse: VkWallUploadResponse): string {
   const value = uploadResponse.hash;
   if (typeof value !== "string" || !value) {
-    throw new Error(
+    throw new VkUploadPayloadError(
       `VK wall photo upload response did not include hash (${summarizeVkUploadResponse(
         uploadResponse
       )})`
