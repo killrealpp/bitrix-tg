@@ -149,10 +149,9 @@ OpenRouter now has SMM preparation prompts for `event`, `promo`, and
 `social_publications` table for target-level state and new `bitrix_posts` fields
 for `post_type`, selected targets, and prepared text.
 
-MAX publishing uploads images through `/uploads?type=image` and sends them as
-message attachments. VK publishing uploads wall photos with `VK_ACCESS_TOKEN`
-and posts to the group wall with `VK_TOKEN`. The internal scheduler publishes
-all selected targets together.
+MAX publishing sends public image URLs as message attachments. VK publishing
+uploads wall photos with `VK_ACCESS_TOKEN` and posts to the group wall with
+`VK_TOKEN`. The internal scheduler publishes all selected targets together.
 
 Verification: `npm run build` passed and `npm test` passed 145 tests in 14
 files.
@@ -222,4 +221,15 @@ whether `server` and `hash` were present, which payload field was returned
 while making the next production retry actionable.
 
 Verification: `npm test` passed 154 tests in 14 files and `npm run build`
+passed.
+
+## [2026-07-01 13:02+03:00] milestone | MAX image URL attachments
+
+Production MAX reached image upload after the server CA fix, but `/uploads`
+returned no usable token for the image flow. The current MAX docs allow images
+to be attached by direct external URL in `attachments.payload.url`, so MAX image
+publishing now uses encoded Bitrix photo URLs directly and skips `/uploads` for
+images. VK and Telegram remain unchanged.
+
+Verification: `npm test` passed 155 tests in 14 files and `npm run build`
 passed.

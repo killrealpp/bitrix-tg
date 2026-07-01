@@ -43,30 +43,10 @@ describe("MaxClient", () => {
     });
   });
 
-  it("uploads multiple images and sends them as message attachments", async () => {
+  it("sends multiple image URL attachments", async () => {
     const messageBodies: unknown[] = [];
-    let uploadCounter = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "https://platform-api2.max.ru/uploads?type=image") {
-        uploadCounter += 1;
-        return jsonResponse({
-          url: `https://upload.max/${uploadCounter}`
-        });
-      }
-
-      if (url.startsWith("https://example.com/")) {
-        return imageResponse();
-      }
-
-      if (url.startsWith("https://upload.max/")) {
-        const uploadId = url.split("/").at(-1);
-        expect(init?.body).toBeInstanceOf(FormData);
-        return jsonResponse({
-          token: `image-token-${uploadId}`
-        });
-      }
-
       if (url === "https://platform-api2.max.ru/messages?chat_id=max-chat") {
         messageBodies.push(JSON.parse(String(init?.body)));
         return jsonResponse({
@@ -106,24 +86,19 @@ describe("MaxClient", () => {
           {
             type: "image",
             payload: {
-              token: "image-token-1"
+              url: "https://example.com/photo%20one.jpg"
             }
           },
           {
             type: "image",
             payload: {
-              token: "image-token-2"
+              url: "https://example.com/photo%20two.jpg"
             }
           }
         ]
       }
     ]);
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
-      "https://example.com/photo%20one.jpg"
-    );
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
-      "https://example.com/photo%20two.jpg"
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries message send when MAX reports attachment.not.ready", async () => {
@@ -131,22 +106,6 @@ describe("MaxClient", () => {
     const sleepCalls: number[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "https://platform-api2.max.ru/uploads?type=image") {
-        return jsonResponse({
-          url: "https://upload.max/ready"
-        });
-      }
-
-      if (url === "https://example.com/photo.jpg") {
-        return imageResponse();
-      }
-
-      if (url === "https://upload.max/ready") {
-        return jsonResponse({
-          token: "image-token"
-        });
-      }
-
       if (url === "https://platform-api2.max.ru/messages?chat_id=max-chat") {
         sendAttempts += 1;
         return sendAttempts === 1
@@ -183,6 +142,27 @@ describe("MaxClient", () => {
     expect(result.externalId).toBe("max-after-retry");
     expect(sendAttempts).toBe(2);
     expect(sleepCalls).toEqual([1000]);
+  });
+
+  it("rejects unresolved image attachments", async () => {
+    const client = new MaxClient({
+      token: "max-secret",
+      chatId: "max-chat"
+    });
+
+    await expect(
+      client.publish({
+        bitrixId: 5,
+        text: "Needs image URL",
+        photos: [
+          {
+            id: "258907",
+            unresolved: true
+          }
+        ],
+        payloadHash: "hash"
+      })
+    ).rejects.toThrow("Cannot attach unresolved Bitrix photo id 258907");
   });
 
   it("adds operation context and redacts token when fetch fails", async () => {
@@ -235,15 +215,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: {
       "content-type": "application/json"
-    }
-  });
-}
-
-function imageResponse(): Response {
-  return new Response(new Uint8Array([1, 2, 3]), {
-    status: 200,
-    headers: {
-      "content-type": "image/jpeg"
     }
   });
 }

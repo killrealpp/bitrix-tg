@@ -1,6 +1,5 @@
 import type { NormalizedPhoto } from "../bitrix/parseWebhook";
 import { redactSensitiveText } from "../security/redaction";
-import { downloadPhoto } from "./photoDownload";
 import {
   publicationKindForPhotos,
   type ExternalDeleteInput,
@@ -13,6 +12,10 @@ export interface MaxClientOptions {
   token: string;
   chatId: string;
   apiBaseUrl?: string;
+  /**
+   * Retained for config compatibility. MAX image attachments use direct URLs,
+   * so this option is currently not used by the MAX client.
+   */
   photoDownloadTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -31,21 +34,11 @@ interface MaxMessageResponse {
   message_text?: unknown;
 }
 
-interface MaxUploadUrlResponse {
-  url?: unknown;
-  token?: unknown;
-}
-
-interface MaxUploadCompleteResponse {
-  token?: unknown;
-}
-
 export class MaxClient implements ExternalSocialPublisher {
   readonly target = "max" as const;
   private readonly apiBaseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
-  private readonly photoDownloadTimeoutMs: number;
 
   constructor(private readonly options: MaxClientOptions) {
     this.apiBaseUrl = (options.apiBaseUrl ?? "https://platform-api2.max.ru").replace(
@@ -54,7 +47,6 @@ export class MaxClient implements ExternalSocialPublisher {
     );
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.sleep = options.sleep ?? sleep;
-    this.photoDownloadTimeoutMs = Math.max(1, options.photoDownloadTimeoutMs ?? 15_000);
   }
 
   async publish(input: ExternalPublishInput): Promise<ExternalPublishResult> {
@@ -62,7 +54,7 @@ export class MaxClient implements ExternalSocialPublisher {
     for (const photo of input.photos) {
       attachments.push({
         type: "image",
-        payload: await this.uploadImage(photo)
+        payload: getImageUrlPayload(photo)
       });
     }
 
@@ -124,40 +116,6 @@ export class MaxClient implements ExternalSocialPublisher {
     );
   }
 
-  private async uploadImage(photo: NormalizedPhoto): Promise<Record<string, unknown>> {
-    if (!photo.url || photo.unresolved) {
-      throw new Error(`Cannot upload unresolved Bitrix photo id ${photo.id ?? "unknown"}`);
-    }
-
-    const upload = await this.requestJson<MaxUploadUrlResponse>("/uploads?type=image", {
-      method: "POST"
-    });
-    const uploadUrl = getStringField(upload, "url");
-    const photoFile = await downloadPhoto(photo.url, {
-      timeoutMs: this.photoDownloadTimeoutMs,
-      fetchImpl: this.fetchImpl,
-      secrets: [this.options.token]
-    });
-    const form = new FormData();
-    form.append("data", photoFile.blob, photoFile.filename);
-
-    const uploaded = await this.fetchUpload<MaxUploadCompleteResponse>(uploadUrl, {
-      method: "POST",
-      body: form
-    });
-    const token =
-      getOptionalStringField(uploaded, "token") ??
-      getOptionalStringField(upload, "token") ??
-      extractTokenFromUploadUrl(uploadUrl);
-    if (!token) {
-      throw new Error("MAX image upload did not return a token");
-    }
-
-    return {
-      token
-    };
-  }
-
   private async requestJson<T>(path: string, init: RequestInit): Promise<T> {
     const url = `${this.apiBaseUrl}${path}`;
     let response: Response;
@@ -178,27 +136,6 @@ export class MaxClient implements ExternalSocialPublisher {
     }
 
     return this.parseResponse<T>(response, path);
-  }
-
-  private async fetchUpload<T>(url: string, init: RequestInit): Promise<T> {
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        ...init,
-        headers: {
-          authorization: this.options.token,
-          ...(init.headers ?? {})
-        }
-      });
-    } catch (error) {
-      throw new Error(
-        `MAX upload fetch failed: ${redactSensitiveText(getErrorMessage(error), [
-          this.options.token
-        ])}`
-      );
-    }
-
-    return this.parseResponse<T>(response, "upload");
   }
 
   private async parseResponse<T>(response: Response, operation: string): Promise<T> {
@@ -247,29 +184,6 @@ function extractMessageId(data: MaxMessageResponse): string {
   return text;
 }
 
-function getStringField(record: object, field: string): string {
-  const value = getOptionalStringField(record, field);
-  if (!value) {
-    throw new Error(`MAX response did not include ${field}`);
-  }
-
-  return value;
-}
-
-function getOptionalStringField(record: object, field: string): string | null {
-  const value = (record as Record<string, unknown>)[field];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function extractTokenFromUploadUrl(uploadUrl: string): string | null {
-  try {
-    const parsed = new URL(uploadUrl);
-    return parsed.searchParams.get("token");
-  } catch {
-    return null;
-  }
-}
-
 function extractErrorMessage(data: unknown): string {
   if (data && typeof data === "object") {
     const record = data as Record<string, unknown>;
@@ -314,4 +228,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function getImageUrlPayload(photo: NormalizedPhoto): Record<string, unknown> {
+  if (!photo.url || photo.unresolved) {
+    throw new Error(`Cannot attach unresolved Bitrix photo id ${photo.id ?? "unknown"}`);
+  }
+
+  return {
+    url: encodeURI(photo.url)
+  };
 }
