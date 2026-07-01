@@ -209,6 +209,118 @@ describe("VkClient", () => {
     expect(saveWallPhotoBodies[0].get("photo")).toBe("[{\"photo\":\"payload\"}]");
   });
 
+  it("rejects empty wall photo upload payload before saveWallPhoto", async () => {
+    const methodCalls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("https://api.vk.com/method/")) {
+        const method = url.split("/").at(-1) ?? "";
+        methodCalls.push(method);
+
+        if (method === "photos.getWallUploadServer") {
+          return jsonResponse({
+            response: {
+              upload_url: "https://vk-upload/empty"
+            }
+          });
+        }
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url === "https://vk-upload/empty") {
+        return jsonResponse({
+          server: 7,
+          photo: "[]",
+          hash: "hash"
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock
+    });
+
+    await expect(
+      client.publish({
+        bitrixId: 5,
+        text: "VK empty upload",
+        photos: [
+          {
+            url: "https://example.com/photo.jpg"
+          }
+        ],
+        payloadHash: "hash"
+      })
+    ).rejects.toThrow(
+      "VK wall photo upload returned empty photo payload (upload response: server=7, hash=present, payloadField=photo, payloadLength=2)"
+    );
+    expect(methodCalls).toEqual(["photos.getWallUploadServer"]);
+  });
+
+  it("adds wall photo upload diagnostics when saveWallPhoto fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/photos.getWallUploadServer")) {
+        return jsonResponse({
+          response: {
+            upload_url: "https://vk-upload/invalid-photo"
+          }
+        });
+      }
+
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url === "https://vk-upload/invalid-photo") {
+        return jsonResponse({
+          server: 9,
+          photos_list: "[{\"photo\":\"payload\"}]",
+          hash: "hash"
+        });
+      }
+
+      if (url.endsWith("/photos.saveWallPhoto")) {
+        return jsonResponse({
+          error: {
+            error_code: 100,
+            error_msg: "One of the parameters specified was missing or invalid: photos_list is invalid"
+          }
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessToken: "user-token",
+      groupId: "123",
+      fetchImpl: fetchMock
+    });
+
+    await expect(
+      client.publish({
+        bitrixId: 6,
+        text: "VK save fail",
+        photos: [
+          {
+            url: "https://example.com/photo.jpg"
+          }
+        ],
+        payloadHash: "hash"
+      })
+    ).rejects.toThrow(
+      "VK photos.saveWallPhoto failed: 100 One of the parameters specified was missing or invalid: photos_list is invalid (upload response: server=9, hash=present, payloadField=photos_list, payloadLength=21)"
+    );
+  });
+
   it("requires VK_ACCESS_TOKEN to upload wall photos", async () => {
     const client = new VkClient({
       communityToken: "community-token",

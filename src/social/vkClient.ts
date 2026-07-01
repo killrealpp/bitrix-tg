@@ -37,10 +37,10 @@ interface VkWallUploadServerResponse {
 }
 
 interface VkWallUploadResponse {
-  server: number;
-  photo?: string;
-  photos_list?: string;
-  hash: string;
+  server?: unknown;
+  photo?: unknown;
+  photos_list?: unknown;
+  hash?: unknown;
 }
 
 interface VkSavedPhoto {
@@ -132,16 +132,24 @@ export class VkClient implements ExternalSocialPublisher {
       uploadServer.upload_url,
       form
     );
-    const saved = await this.callVk<VkSavedPhoto[]>(
-      "photos.saveWallPhoto",
-      {
-        group_id: this.options.groupId,
-        server: String(uploadResponse.server),
-        photo: getUploadedPhotoPayload(uploadResponse),
-        hash: uploadResponse.hash
-      },
-      this.options.userAccessToken
-    );
+    const saveParams = {
+      group_id: this.options.groupId,
+      server: getUploadedPhotoServer(uploadResponse),
+      photo: getUploadedPhotoPayload(uploadResponse),
+      hash: getUploadedPhotoHash(uploadResponse)
+    };
+    let saved: VkSavedPhoto[];
+    try {
+      saved = await this.callVk<VkSavedPhoto[]>(
+        "photos.saveWallPhoto",
+        saveParams,
+        this.options.userAccessToken
+      );
+    } catch (error) {
+      throw new Error(
+        `${getErrorMessage(error)} (${summarizeVkUploadResponse(uploadResponse)})`
+      );
+    }
     const first = saved[0];
     if (!first) {
       throw new Error("VK saveWallPhoto returned no photos");
@@ -202,10 +210,79 @@ export class VkClient implements ExternalSocialPublisher {
 }
 
 function getUploadedPhotoPayload(uploadResponse: VkWallUploadResponse): string {
-  const payload = uploadResponse.photo ?? uploadResponse.photos_list;
-  if (!payload) {
-    throw new Error("VK wall photo upload response did not include photo payload");
+  const payload = stringifyUploadPayload(uploadResponse.photo ?? uploadResponse.photos_list);
+  if (!payload || payload === "[]" || payload === "{}" || payload === "null") {
+    throw new Error(
+      `VK wall photo upload returned empty photo payload (${summarizeVkUploadResponse(
+        uploadResponse
+      )})`
+    );
   }
 
   return payload;
+}
+
+function getUploadedPhotoServer(uploadResponse: VkWallUploadResponse): string {
+  const value = uploadResponse.server;
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw new Error(
+      `VK wall photo upload response did not include server (${summarizeVkUploadResponse(
+        uploadResponse
+      )})`
+    );
+  }
+
+  return String(value);
+}
+
+function getUploadedPhotoHash(uploadResponse: VkWallUploadResponse): string {
+  const value = uploadResponse.hash;
+  if (typeof value !== "string" || !value) {
+    throw new Error(
+      `VK wall photo upload response did not include hash (${summarizeVkUploadResponse(
+        uploadResponse
+      )})`
+    );
+  }
+
+  return value;
+}
+
+function stringifyUploadPayload(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (value === undefined) {
+    return "";
+  }
+
+  const text = JSON.stringify(value);
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function summarizeVkUploadResponse(uploadResponse: VkWallUploadResponse): string {
+  const payloadField =
+    uploadResponse.photo !== undefined
+      ? "photo"
+      : uploadResponse.photos_list !== undefined
+        ? "photos_list"
+        : "none";
+  const payload = stringifyUploadPayload(
+    uploadResponse.photo ?? uploadResponse.photos_list
+  );
+  const server =
+    typeof uploadResponse.server === "string" || typeof uploadResponse.server === "number"
+      ? String(uploadResponse.server)
+      : "missing";
+  const hash =
+    typeof uploadResponse.hash === "string" && uploadResponse.hash
+      ? "present"
+      : "missing";
+
+  return `upload response: server=${server}, hash=${hash}, payloadField=${payloadField}, payloadLength=${payload.length}`;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

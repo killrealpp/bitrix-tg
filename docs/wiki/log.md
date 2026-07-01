@@ -210,3 +210,16 @@ will show where the MAX request actually fails.
 
 Verification: `npm test` passed 152 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-01 11:58+03:00] milestone | VK upload response diagnostics
+
+Production retry still reached `photos.saveWallPhoto`, which means the new
+server-bound VK token is accepted, but VK rejected the uploaded photo payload as
+invalid. The VK client now validates wall upload responses before
+`photos.saveWallPhoto` and records a compact diagnostic summary when save fails:
+whether `server` and `hash` were present, which payload field was returned
+(`photo` or `photos_list`), and the payload length. This keeps tokens out of logs
+while making the next production retry actionable.
+
+Verification: `npm test` passed 154 tests in 14 files and `npm run build`
+passed.
