@@ -20,7 +20,10 @@ import {
   type MissingScheduleTimeAdminNotifier,
   type ProcessResult
 } from "./poster/processBitrixEvent";
-import { runDuePosts } from "./scheduler/runDuePosts";
+import {
+  runDuePosts,
+  type ScheduledPostFailureEvent
+} from "./scheduler/runDuePosts";
 import { redactErrorForLog, redactSensitiveText } from "./security/redaction";
 import type { TextFitOptions } from "./text/fitText";
 import { createOpenRouterTextFit } from "./text/openRouterTextFit";
@@ -119,6 +122,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
         activeFromUtcOffsetMinutes: deps.config.bitrixLocalUtcOffsetMinutes
       });
       const results: ProcessResult[] = [];
+      const textFit = withTextFitDiagnostics(deps.textFit, app, logSecrets);
       logParsedEvents(app, events);
 
       for (const event of events) {
@@ -129,7 +133,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
             externalPublishers: deps.externalPublishers,
             adminNotifier: deps.adminNotifier,
             photoResolver: deps.photoResolver,
-            textFit: deps.textFit,
+            textFit,
             mediaSyncPolicy: deps.config.telegramMediaSyncPolicy,
             requireExactScheduleTime:
               deps.config.bitrixRequireExactActiveFrom ?? false
@@ -141,7 +145,7 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
         events,
         results,
         logSecrets,
-        Boolean(deps.textFit?.aiPrepare)
+        Boolean(textFit?.aiPrepare)
       );
 
       return {
@@ -393,7 +397,10 @@ export async function startServer(): Promise<void> {
         externalPublishers,
         adminNotifier,
         photoResolver,
-        textFit
+        textFit: withTextFitDiagnostics(textFit, app, logSecrets),
+        onPostFailure: (failure) => {
+          logScheduledPostFailure(app, failure, logSecrets);
+        }
       });
       if (result.checked > 0 || result.published > 0 || result.failed > 0) {
         app.log.info({ result }, "Scheduled publishing worker result");
@@ -433,6 +440,78 @@ if (require.main === module) {
     );
     process.exit(1);
   });
+}
+
+function withTextFitDiagnostics(
+  textFit: TextFitOptions | undefined,
+  app: FastifyInstance,
+  logSecrets: string[]
+): TextFitOptions | undefined {
+  if (!textFit) {
+    return undefined;
+  }
+
+  return {
+    ...textFit,
+    aiPrepare: textFit.aiPrepare
+      ? async (request) => {
+          const startedAt = Date.now();
+          const prepared = await textFit.aiPrepare?.(request);
+          const outputLength = prepared?.trim().length ?? 0;
+
+          if (outputLength > 0) {
+            app.log.info(
+              {
+                bitrixId: request.bitrixId,
+                postType: request.postType,
+                inputLength: request.text.length,
+                outputLength,
+                target: request.target,
+                truncatedToTarget: outputLength > request.target,
+                durationMs: Date.now() - startedAt
+              },
+              "AI social text preparation completed"
+            );
+          }
+
+          return prepared ?? "";
+        }
+      : undefined,
+    onAiPrepareFailure: async (failure) => {
+      try {
+        await textFit.onAiPrepareFailure?.(failure);
+      } catch {
+        // Preserve the built-in fallback even if a custom diagnostic hook fails.
+      }
+
+      app.log.warn(
+        {
+          bitrixId: failure.bitrixId,
+          postType: failure.postType,
+          error: redactSensitiveText(failure.error, logSecrets)
+        },
+        "AI social text preparation failed; using deterministic fallback"
+      );
+    }
+  };
+}
+
+function logScheduledPostFailure(
+  app: FastifyInstance,
+  failure: ScheduledPostFailureEvent,
+  logSecrets: string[]
+): void {
+  app.log.warn(
+    {
+      bitrixId: failure.bitrixId,
+      error: redactSensitiveText(failure.error, logSecrets),
+      retryCount: failure.retryCount,
+      willRetry: failure.willRetry,
+      nextRetryAt: failure.nextRetryAt?.toISOString() ?? null,
+      publishTargets: failure.publishTargets
+    },
+    "Scheduled publishing post failed"
+  );
 }
 
 function getLogSecrets(

@@ -21,6 +21,7 @@ export async function prepareSocialText(
   try {
     const prepared = (
       await options.aiPrepare({
+        bitrixId: event.bitrixId,
         text: formatted,
         postType: event.postType,
         target: SOCIAL_AI_TARGET,
@@ -39,11 +40,38 @@ export async function prepareSocialText(
     if (prepared.length > SOCIAL_AI_TARGET) {
       return truncateAtWord(prepared, SOCIAL_AI_TARGET);
     }
-  } catch {
+
+    await notifyAiPrepareFailure(
+      event,
+      options,
+      new Error("AI social text preparation returned an empty response")
+    );
+  } catch (error) {
+    await notifyAiPrepareFailure(event, options, error);
     // Deterministic formatting keeps publication available if AI is unavailable.
   }
 
   return truncateAtWord(formatted, SOCIAL_AI_TARGET);
+}
+
+async function notifyAiPrepareFailure(
+  event: ParsedBitrixEvent,
+  options: TextFitOptions,
+  error: unknown
+): Promise<void> {
+  if (!options.onAiPrepareFailure) {
+    return;
+  }
+
+  try {
+    await options.onAiPrepareFailure({
+      bitrixId: event.bitrixId,
+      postType: event.postType,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  } catch {
+    // AI failure logging must not block deterministic publication fallback.
+  }
 }
 
 export function formatOnlyText(text: string, postType: PostType): string {

@@ -35,6 +35,7 @@ export interface RunDuePostsDeps {
   maxScheduledRetries?: number;
   adminNotifier?: ScheduledFailureAdminNotifier;
   photoResolver?: BitrixPhotoResolver;
+  onPostFailure?: (failure: ScheduledPostFailureEvent) => void | Promise<void>;
 }
 
 export interface ScheduledFailureAdminNotifier {
@@ -49,6 +50,15 @@ export interface RunDuePostsResult {
   checked: number;
   published: number;
   failed: number;
+}
+
+export interface ScheduledPostFailureEvent {
+  bitrixId: number;
+  error: string;
+  retryCount: number;
+  willRetry: boolean;
+  nextRetryAt: Date | null;
+  publishTargets: StoredBitrixPost["publishTargets"];
 }
 
 export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsResult> {
@@ -96,12 +106,22 @@ export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsRes
       const message = redactErrorMessage(error);
 
       if (post.scheduledRetryCount < maxScheduledRetries) {
+        const nextRetryAt = new Date(now.getTime() + retryDelayMs);
+        const nextRetryCount = post.scheduledRetryCount + 1;
         await deps.db.updatePost(post.id, {
           status: "scheduled",
-          scheduledAt: new Date(now.getTime() + retryDelayMs),
+          scheduledAt: nextRetryAt,
           lastError: message,
-          scheduledRetryCount: post.scheduledRetryCount + 1,
+          scheduledRetryCount: nextRetryCount,
           adminNotifiedAt: null
+        });
+        await notifyScheduledPostFailure(deps, {
+          bitrixId: post.bitrixId,
+          error: message,
+          retryCount: nextRetryCount,
+          willRetry: true,
+          nextRetryAt,
+          publishTargets: post.publishTargets
         });
         continue;
       }
@@ -125,6 +145,14 @@ export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsRes
         lastError: message,
         adminNotifiedAt
       });
+      await notifyScheduledPostFailure(deps, {
+        bitrixId: post.bitrixId,
+        error: message,
+        retryCount: post.scheduledRetryCount,
+        willRetry: false,
+        nextRetryAt: null,
+        publishTargets: post.publishTargets
+      });
     }
   }
 
@@ -133,6 +161,21 @@ export async function runDuePosts(deps: RunDuePostsDeps): Promise<RunDuePostsRes
     published,
     failed
   };
+}
+
+async function notifyScheduledPostFailure(
+  deps: RunDuePostsDeps,
+  failure: ScheduledPostFailureEvent
+): Promise<void> {
+  if (!deps.onPostFailure) {
+    return;
+  }
+
+  try {
+    await deps.onPostFailure(failure);
+  } catch {
+    // Diagnostic logging hooks must not mask scheduled publication state updates.
+  }
 }
 
 function redactErrorMessage(error: unknown): string {

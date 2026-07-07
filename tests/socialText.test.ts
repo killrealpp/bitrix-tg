@@ -24,6 +24,7 @@ describe("prepareSocialText", () => {
       expect(text).toBe(`AI ${postType} post`);
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
+        bitrixId: 1,
         postType,
         target: 1000
       });
@@ -66,6 +67,46 @@ describe("prepareSocialText", () => {
     });
 
     expect(text).toBe("📢 News");
+  });
+
+  it("reports AI preparation failures before deterministic fallback", async () => {
+    const failures: unknown[] = [];
+    const text = await prepareSocialText(eventWithPostType("company_news"), "News", {
+      aiPrepare: async () => {
+        throw new Error("provider is down");
+      },
+      onAiPrepareFailure: async (failure) => {
+        failures.push(failure);
+      }
+    });
+
+    expect(text).toBe("📢 News");
+    expect(failures).toEqual([
+      {
+        bitrixId: 1,
+        postType: "company_news",
+        error: "provider is down"
+      }
+    ]);
+  });
+
+  it("reports empty AI preparation before deterministic fallback", async () => {
+    const failures: unknown[] = [];
+    const text = await prepareSocialText(eventWithPostType("promo"), "Sale", {
+      aiPrepare: async () => "   ",
+      onAiPrepareFailure: async (failure) => {
+        failures.push(failure);
+      }
+    });
+
+    expect(text).toBe("🔥 Sale");
+    expect(failures).toEqual([
+      {
+        bitrixId: 1,
+        postType: "promo",
+        error: "AI social text preparation returned an empty response"
+      }
+    ]);
   });
 });
 

@@ -198,6 +198,26 @@ describe("parseBitrixWebhook", () => {
     expect(event.postTypeRaw).toBe("События");
   });
 
+  it("treats production Новинки post type as company news", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: "181848",
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y",
+          vk: "Y",
+          max: "Y"
+        },
+        post_type: "Новинки",
+        name: "Новинка оборудования"
+      }
+    });
+
+    expect(event.postType).toBe("company_news");
+    expect(event.postTypeRaw).toBe("Новинки");
+  });
+
   it("normalizes Bitrix/PHP uppercase photo objects with SRC fields", () => {
     const [event] = parseBitrixWebhook({
       body: {

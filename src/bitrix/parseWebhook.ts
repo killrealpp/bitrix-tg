@@ -462,7 +462,7 @@ function normalizePostType(value: unknown): {
     return { postType: "company_news", raw };
   }
 
-  if (/(news|новост)/i.test(normalized)) {
+  if (/(news|новост|новинк)/i.test(normalized)) {
     return { postType: "company_news", raw };
   }
 

@@ -159,12 +159,19 @@ describe("scheduled publishing", () => {
       now: new Date("2026-06-04T12:00:00.000Z")
     });
 
+    const failures: unknown[] = [];
     const firstRun = await runDuePosts({
       db,
       telegram,
       externalPublishers: { vk, max },
       now: new Date("2026-06-04T13:00:00.000Z"),
-      scheduledRetryDelayMs: 60_000
+      scheduledRetryDelayMs: 60_000,
+      onPostFailure: (failure) => {
+        failures.push({
+          ...failure,
+          nextRetryAt: failure.nextRetryAt?.toISOString() ?? null
+        });
+      }
     });
 
     expect(firstRun).toEqual({ checked: 1, published: 0, failed: 1 });
@@ -189,6 +196,20 @@ describe("scheduled publishing", () => {
       status: "failed",
       lastError: "VK temporary failure"
     });
+    expect(failures).toEqual([
+      {
+        bitrixId: 32,
+        error: "VK: VK temporary failure",
+        retryCount: 1,
+        willRetry: true,
+        nextRetryAt: "2026-06-04T13:01:00.000Z",
+        publishTargets: {
+          telegram: true,
+          vk: true,
+          max: true
+        }
+      }
+    ]);
 
     vk.failPublish = null;
     const secondRun = await runDuePosts({

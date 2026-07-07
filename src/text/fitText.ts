@@ -13,6 +13,7 @@ export interface TextFitRequest {
 }
 
 export interface SocialTextPrepareRequest {
+  bitrixId: number;
   text: string;
   postType: PostType;
   target: number;
@@ -26,6 +27,11 @@ export interface SocialTextPrepareRequest {
 export interface TextFitOptions {
   aiFit?: (request: TextFitRequest) => Promise<string>;
   aiPrepare?: (request: SocialTextPrepareRequest) => Promise<string>;
+  onAiPrepareFailure?: (failure: {
+    bitrixId: number;
+    postType: PostType;
+    error: string;
+  }) => void | Promise<void>;
 }
 
 export async function fitForTelegramText(

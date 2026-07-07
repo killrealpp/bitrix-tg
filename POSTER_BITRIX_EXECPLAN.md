@@ -43,6 +43,8 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-06-08 11:45+03:00) Added OpenRouter-backed AI text fitting: short texts bypass AI, over-limit text/captions call OpenRouter through `OPENROUTER_*` env, legacy `OPENAI_*` env remains a fallback, and AI failure or too-long AI output falls back to deterministic truncation.
 - [x] (2026-06-26 18:40+03:00) Added the multi-social layer for canonical Bitrix fields `publish_social`, `publish_targets`, `post_type`, and `property_meta`; Telegram retains edit/rebuild, VK/MAX publish/delete only, OpenRouter prepares event/promo/company-news posts, SQLite stores per-target `social_publications`, and fake-client coverage verifies Telegram/VK/MAX scheduling, idempotency, target enable/disable, and client photo flows.
 - [x] (2026-07-01 13:02+03:00) Switched MAX image publication from `/uploads?type=image` token flow to direct public image URL attachments (`attachments.payload.url`) after production showed image upload responses without a usable token and the current MAX docs confirmed URL attachments for images.
+- [x] (2026-07-06 18:08+03:00) Diagnosed production logs for Bitrix element `181848`: `post_type: "Новинки"` now maps to the company-news AI prompt, AI preparation fallback is logged, and scheduled VK/MAX/TG partial failures emit per-post diagnostic logs instead of only aggregate `failed:1`.
+- [x] (2026-07-07 09:00+03:00) Added explicit AI preparation diagnostics: OpenRouter success logs now include `bitrixId`, `postType`, input/output length, target, truncation flag, and duration; empty AI responses are reported before deterministic fallback.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -119,6 +121,12 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 
 - Observation: `active_from` can arrive with an exact time, e.g. `11.06.2026 00:05:00`, and date-only values should no longer be treated as midnight.
   Evidence: The user provided the production-shaped payload with `active_from: "11.06.2026 00:05:00"` and clarified that if exact time is absent, the post must not be sent and the admin must be notified.
+
+- Observation: Production can send `post_type: "Новинки"`, which is a business/news category but was previously parsed as `unknown`.
+  Evidence: The 2026-07-06 production log for Bitrix id `181848` showed `postTypeRaw: "Новинки"` with `postType: "unknown"`, so the service selected the format-only prompt instead of the company-news prompt.
+
+- Observation: A scheduled multi-social post can be partially published even when the worker result is `failed`.
+  Evidence: `runDuePosts` records Telegram/MAX publications before surfacing a VK failure; the aggregate log only showed `{ checked: 1, published: 0, failed: 1 }`, while the client's report said Telegram and MAX received the post but VK did not.
 
 ## Decision Log
 
@@ -270,6 +278,18 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: `event`, `promo`, and `company_news` use their business SMM prompts. `entertainment`, `unknown`, and any other non-business type use a format-only prompt that preserves the original meaning/facts and only adds light structure plus 1-3 relevant emoji.
   Date/Author: 2026-07-01 / User
 
+- Decision: Treat Bitrix `Новинки` as `company_news`.
+  Rationale: Production uses `Новинки` for a business/news-like item. Parsing it as `unknown` sends the format-only AI prompt and makes the resulting post look like AI did not apply the intended news prompt.
+  Date/Author: 2026-07-06 / Codex
+
+- Decision: Log AI preparation fallback and per-post scheduled publication failures.
+  Rationale: Operators need to distinguish "AI was expected" from "AI succeeded", and need the exact failed platform/error when a scheduled VK/MAX/TG publication is only partially successful.
+  Date/Author: 2026-07-06 / Codex
+
+- Decision: Log successful AI preparation as an explicit operational event.
+  Rationale: Comparing final post wording is not a reliable way to prove whether OpenRouter ran. The service now logs successful AI preparation with `bitrixId`, `postType`, input/output lengths, target, truncation flag, and duration, while empty or failed AI responses continue into deterministic fallback with a warning.
+  Date/Author: 2026-07-07 / Codex
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -301,6 +321,10 @@ Additional verification on 2026-06-05 at 09:56+03:00: `npm test` passed 75 tests
 Additional verification on 2026-06-08 at 11:55+03:00: `npm test` passed 119 tests in 11 files, and `npm run build` passed. New coverage proves that short texts bypass AI, over-limit text/captions use the injected text fitter, empty AI responses, AI failures, and over-limit AI responses fall back to deterministic truncation, webhook and scheduled publication store fitted text, OpenRouter requests use the chat-completions contract, and OpenRouter/OpenAI secret-shaped values are redacted from errors.
 
 Additional verification on 2026-06-26 at 18:40+03:00: `npm run build` passed and `npm test` passed 145 tests in 14 files. New coverage proves canonical target parsing and master override, SMM prompt selection, Telegram/VK/MAX scheduled publishing together, duplicate webhook protection across all targets, VK/MAX no-edit/no-duplicate behavior on content change, newly enabled targets publishing once, unchecked/master-disabled targets deleting stored publications, MAX image URL attachment/retry/delete flow, and VK wall photo upload plus group wall posting.
+
+Additional verification on 2026-07-06 at 18:08+03:00: `npm test -- --run` passed 164 tests in 14 files, and `npm run build` passed. New coverage proves that `Новинки` maps to `company_news`, AI preparation failures call a diagnostic hook before deterministic fallback, and scheduled external-target failures report Bitrix id, selected targets, retry state, next retry time, and redacted aggregate error.
+
+Additional verification on 2026-07-07 at 09:00+03:00: `npm test -- --run` passed 165 tests in 14 files, and `npm run build` passed. New coverage proves that every AI preparation request carries the Bitrix id for logging, empty AI responses are reported before deterministic fallback, and the server logs successful AI preparation without exposing secrets.
 
 ## Context and Orientation
 
