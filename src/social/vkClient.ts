@@ -9,10 +9,12 @@ import {
   type ExternalPublishResult,
   type ExternalSocialPublisher
 } from "./types";
+import type { VkUserAccessTokenProvider } from "./vkOAuth";
 
 export interface VkClientOptions {
   communityToken: string;
   userAccessToken?: string;
+  userAccessTokenProvider?: VkUserAccessTokenProvider;
   groupId: string;
   apiVersion?: string;
   postAsGroup?: boolean;
@@ -121,10 +123,28 @@ export class VkClient implements ExternalSocialPublisher {
   }
 
   private async uploadWallPhoto(photo: NormalizedPhoto): Promise<string> {
-    const userAccessToken = this.options.userAccessToken;
+    const userAccessToken = await this.getUserAccessToken();
     if (!userAccessToken) {
       throw new Error("VK_ACCESS_TOKEN is required to upload wall photos");
     }
+
+    try {
+      return await this.uploadWallPhotoWithToken(photo, userAccessToken);
+    } catch (error) {
+      if (!isInvalidAccessTokenError(error) || !this.options.userAccessTokenProvider) {
+        throw error;
+      }
+
+      const refreshedToken =
+        await this.options.userAccessTokenProvider.refreshAccessToken();
+      return this.uploadWallPhotoWithToken(photo, refreshedToken);
+    }
+  }
+
+  private async uploadWallPhotoWithToken(
+    photo: NormalizedPhoto,
+    userAccessToken: string
+  ): Promise<string> {
 
     if (!photo.url || photo.unresolved) {
       throw new Error(`Cannot upload unresolved Bitrix photo id ${photo.id ?? "unknown"}`);
@@ -157,6 +177,14 @@ export class VkClient implements ExternalSocialPublisher {
     }
 
     return `photo${first.owner_id}_${first.id}${first.access_key ? `_${first.access_key}` : ""}`;
+  }
+
+  private async getUserAccessToken(): Promise<string | undefined> {
+    if (this.options.userAccessTokenProvider) {
+      return this.options.userAccessTokenProvider.getAccessToken();
+    }
+
+    return this.options.userAccessToken;
   }
 
   private async uploadWallPhotoWithRetry(
@@ -442,6 +470,17 @@ function normalizeUploadError(error: unknown): Error {
   }
 
   return new Error(String(error));
+}
+
+function isInvalidAccessTokenError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("invalid_token") ||
+    message.includes("access token not existed") ||
+    message.includes("access_token has expired") ||
+    (message.includes("access token") && message.includes("invalid")) ||
+    (message.includes("access_token") && message.includes("invalid"))
+  );
 }
 
 function sleep(ms: number): Promise<void> {

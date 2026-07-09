@@ -6,10 +6,12 @@ import type {
   DbGateway,
   PersistPostInput,
   PersistTelegramMessageInput,
+  PersistVkOauthTokenInput,
   SocialPublicationTarget,
   StoredBitrixPost,
   StoredSocialPublication,
   StoredTelegramMessage,
+  StoredVkOauthToken,
   UpdatePostPatch,
   UpsertSocialPublicationInput
 } from "./DbGateway";
@@ -74,6 +76,17 @@ interface TelegramMessageRow {
   media_index: number | null;
   media_url: string | null;
   telegram_file_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VkOauthTokenRow {
+  access_token: string;
+  refresh_token: string;
+  device_id: string;
+  user_id: string | null;
+  scope: string | null;
+  expires_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -343,6 +356,54 @@ export class SqliteGateway implements DbGateway {
     return publication;
   }
 
+  async getVkOauthToken(): Promise<StoredVkOauthToken | null> {
+    const row = await this.db.get<VkOauthTokenRow>(
+      "SELECT * FROM vk_oauth_tokens WHERE id = 1"
+    );
+
+    return row ? mapVkOauthTokenRow(row) : null;
+  }
+
+  async saveVkOauthToken(
+    input: PersistVkOauthTokenInput
+  ): Promise<StoredVkOauthToken> {
+    await this.db.run(
+      `
+        INSERT INTO vk_oauth_tokens (
+          id,
+          access_token,
+          refresh_token,
+          device_id,
+          user_id,
+          scope,
+          expires_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          access_token = excluded.access_token,
+          refresh_token = excluded.refresh_token,
+          device_id = excluded.device_id,
+          user_id = excluded.user_id,
+          scope = excluded.scope,
+          expires_at = excluded.expires_at,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      input.accessToken,
+      input.refreshToken,
+      input.deviceId,
+      input.userId ?? null,
+      input.scope ?? null,
+      input.expiresAt.toISOString()
+    );
+
+    const token = await this.getVkOauthToken();
+    if (!token) {
+      throw new Error("VK OAuth token was not saved");
+    }
+
+    return token;
+  }
+
   async findDueScheduledPosts(now: Date, limit: number): Promise<StoredBitrixPost[]> {
     const rows = await this.db.all<BitrixPostRow[]>(
       `
@@ -479,6 +540,19 @@ function mapTelegramMessageRow(row: TelegramMessageRow): StoredTelegramMessage {
     mediaIndex: row.media_index,
     mediaUrl: row.media_url,
     telegramFileId: row.telegram_file_id,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at)
+  };
+}
+
+function mapVkOauthTokenRow(row: VkOauthTokenRow): StoredVkOauthToken {
+  return {
+    accessToken: row.access_token,
+    refreshToken: row.refresh_token,
+    deviceId: row.device_id,
+    userId: row.user_id,
+    scope: row.scope,
+    expiresAt: new Date(row.expires_at),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
   };

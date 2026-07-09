@@ -45,6 +45,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-07-01 13:02+03:00) Switched MAX image publication from `/uploads?type=image` token flow to direct public image URL attachments (`attachments.payload.url`) after production showed image upload responses without a usable token and the current MAX docs confirmed URL attachments for images.
 - [x] (2026-07-06 18:08+03:00) Diagnosed production logs for Bitrix element `181848`: `post_type: "Новинки"` now maps to the company-news AI prompt, AI preparation fallback is logged, and scheduled VK/MAX/TG partial failures emit per-post diagnostic logs instead of only aggregate `failed:1`.
 - [x] (2026-07-07 09:00+03:00) Added explicit AI preparation diagnostics: OpenRouter success logs now include `bitrixId`, `postType`, input/output length, target, truncation flag, and duration; empty AI responses are reported before deterministic fallback.
+- [x] (2026-07-08 20:15+03:00) Added VK OAuth authorization endpoints, SQLite token storage, and automatic user-token refresh for VK photo upload. `/admin/vk/oauth/start` now redirects an admin through VK ID, `/admin/vk/oauth/callback` stores `access_token`, rotated `refresh_token`, `device_id`, and `expires_at`, and VK photo publishing refreshes/retries once when VK reports an invalid user access token.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -127,6 +128,9 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 
 - Observation: A scheduled multi-social post can be partially published even when the worker result is `failed`.
   Evidence: `runDuePosts` records Telegram/MAX publications before surfacing a VK failure; the aggregate log only showed `{ checked: 1, published: 0, failed: 1 }`, while the client's report said Telegram and MAX received the post but VK did not.
+
+- Observation: A static `VK_ACCESS_TOKEN` is not a production credential for wall-photo upload.
+  Evidence: VK ID access tokens expire after about one hour and production reached `access token not existed`. The service now stores the VK ID refresh-token pair in SQLite and refreshes the user token before photo upload, with one forced refresh/retry when VK reports token invalidation.
 
 ## Decision Log
 
@@ -290,6 +294,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: Comparing final post wording is not a reliable way to prove whether OpenRouter ran. The service now logs successful AI preparation with `bitrixId`, `postType`, input/output lengths, target, truncation flag, and duration, while empty or failed AI responses continue into deterministic fallback with a warning.
   Date/Author: 2026-07-07 / Codex
 
+- Decision: Replace the static VK user access-token path with VK ID OAuth refresh storage, while keeping `VK_ACCESS_TOKEN` as a legacy fallback.
+  Rationale: VK wall photo methods need a user access token, and the manually created access token expires too quickly for scheduled publication. Persisting the rotated `refresh_token` lets the service refresh access before publishing without asking the operator to recreate tokens hourly. `VK_TOKEN` remains available for current community-token wall post/delete behavior.
+  Date/Author: 2026-07-08 / Codex
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -373,7 +381,8 @@ Use these additional environment variables:
 - `MAX_TOKEN`, `MAX_CHAT_ID`, `MAX_API_BASE_URL`, defaulting to `https://platform-api2.max.ru`
 - optional local MAX TLS helper `NODE_EXTRA_CA_CERTS=./data/certs/russian_trusted_ca_bundle.pem`
 - `VK_TOKEN` as the community token for `wall.post`/`wall.delete`
-- `VK_ACCESS_TOKEN` as the user token for `photos.getWallUploadServer`/`photos.saveWallPhoto`
+- `VK_ACCESS_TOKEN` as a legacy static user token fallback for `photos.getWallUploadServer`/`photos.saveWallPhoto`
+- `VK_CLIENT_ID`, `VK_REDIRECT_URI`, optional `VK_SERVICE_TOKEN`, `VK_OAUTH_SCOPE`, `VK_OAUTH_AUTH_URL`, `VK_OAUTH_TOKEN_URL`, `VK_OAUTH_ADMIN_SECRET`, and `VK_OAUTH_TOKEN_REFRESH_SKEW_SECONDS` for the preferred VK ID OAuth refresh flow
 - `VK_GROUP_ID`, `VK_API_VERSION`, defaulting to `5.199`, and `VK_POST_AS_GROUP`, defaulting to `true`
 - `WEBHOOK_SECRET`, if webhook authentication is enabled
 - `PORT`, defaulting to `18080`

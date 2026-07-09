@@ -108,6 +108,26 @@ export interface UpsertSocialPublicationInput {
   deletedAt?: Date | null;
 }
 
+export interface StoredVkOauthToken {
+  accessToken: string;
+  refreshToken: string;
+  deviceId: string;
+  userId: string | null;
+  scope: string | null;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PersistVkOauthTokenInput {
+  accessToken: string;
+  refreshToken: string;
+  deviceId: string;
+  userId?: string | null;
+  scope?: string | null;
+  expiresAt: Date;
+}
+
 export interface DbGateway {
   findPostByBitrixId(bitrixId: number): Promise<StoredBitrixPost | null>;
   createPost(input: PersistPostInput): Promise<StoredBitrixPost>;
@@ -130,6 +150,8 @@ export interface DbGateway {
     postId: number,
     input: UpsertSocialPublicationInput
   ): Promise<StoredSocialPublication>;
+  getVkOauthToken(): Promise<StoredVkOauthToken | null>;
+  saveVkOauthToken(input: PersistVkOauthTokenInput): Promise<StoredVkOauthToken>;
   findDueScheduledPosts(now: Date, limit: number): Promise<StoredBitrixPost[]>;
   close(): Promise<void>;
 }

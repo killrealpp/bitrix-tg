@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { LOG_REDACT_PATHS, buildApp } from "../src/server";
 import { runDuePosts } from "../src/scheduler/runDuePosts";
+import { VkOAuthTokenService } from "../src/social/vkOAuth";
 import {
   FakeBitrixPhotoResolver,
   FakeDbGateway,
@@ -30,6 +31,45 @@ describe("server", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe("OK");
+    await app.close();
+  });
+
+  it("exposes the VK OAuth start route and protects it with the admin secret", async () => {
+    const db = new FakeDbGateway();
+    const vkOAuth = new VkOAuthTokenService({
+      db,
+      clientId: "client-id",
+      redirectUri: "https://poster.example/admin/vk/oauth/callback",
+      authUrl: "https://id.vk.ru/authorize"
+    });
+    const app = buildApp({
+      db,
+      telegram: new FakeTelegramClient(),
+      vkOAuth,
+      config: {
+        vkOAuthAdminSecret: "admin-secret"
+      }
+    });
+
+    const unauthorized = await app.inject({
+      method: "GET",
+      url: "/admin/vk/oauth/start?secret=wrong"
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/admin/vk/oauth/start?secret=admin-secret"
+    });
+
+    expect(response.statusCode).toBe(302);
+    const location = new URL(response.headers.location as string);
+    expect(location.origin + location.pathname).toBe("https://id.vk.ru/authorize");
+    expect(location.searchParams.get("response_type")).toBe("code");
+    expect(location.searchParams.get("client_id")).toBe("client-id");
+    expect(location.searchParams.get("redirect_uri")).toBe(
+      "https://poster.example/admin/vk/oauth/callback"
+    );
     await app.close();
   });
 

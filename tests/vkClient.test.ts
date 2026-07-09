@@ -536,6 +536,100 @@ describe("VkClient", () => {
     expect(uploadAttempts).toBe(1);
   });
 
+  it("refreshes OAuth user token once when VK reports an invalid access token", async () => {
+    const methodCalls: Array<{ method: string; token: string | null }> = [];
+    const provider = {
+      getAccessToken: vi.fn(async () => "old-user-token"),
+      refreshAccessToken: vi.fn(async () => "new-user-token")
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://example.com/photo.jpg") {
+        return imageResponse();
+      }
+
+      if (url.startsWith("https://api.vk.com/method/")) {
+        const method = url.split("/").at(-1) ?? "";
+        const body = bodyParams(init);
+        methodCalls.push({ method, token: body.get("access_token") });
+
+        if (method === "photos.getWallUploadServer") {
+          if (body.get("access_token") === "old-user-token") {
+            return jsonResponse({
+              error: {
+                error_code: 5,
+                error_msg: "User authorization failed: access token not existed"
+              }
+            });
+          }
+
+          return jsonResponse({
+            response: {
+              upload_url: "https://vk-upload/refreshed"
+            }
+          });
+        }
+
+        if (method === "photos.saveWallPhoto") {
+          return jsonResponse({
+            response: [
+              {
+                owner_id: -123,
+                id: 801
+              }
+            ]
+          });
+        }
+
+        if (method === "wall.post") {
+          return jsonResponse({
+            response: {
+              post_id: 206
+            }
+          });
+        }
+      }
+
+      if (url === "https://vk-upload/refreshed") {
+        return jsonResponse({
+          server: 1,
+          photo: "photo-json",
+          hash: "hash"
+        });
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const client = new VkClient({
+      communityToken: "community-token",
+      userAccessTokenProvider: provider,
+      groupId: "123",
+      fetchImpl: fetchMock,
+      uploadRetryAttempts: 1
+    });
+
+    const result = await client.publish({
+      bitrixId: 10,
+      text: "VK refreshed token",
+      photos: [
+        {
+          url: "https://example.com/photo.jpg"
+        }
+      ],
+      payloadHash: "hash"
+    });
+
+    expect(result.externalId).toBe("206");
+    expect(provider.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(provider.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(methodCalls).toEqual([
+      { method: "photos.getWallUploadServer", token: "old-user-token" },
+      { method: "photos.getWallUploadServer", token: "new-user-token" },
+      { method: "photos.saveWallPhoto", token: "new-user-token" },
+      { method: "wall.post", token: "community-token" }
+    ]);
+  });
+
   it("requires VK_ACCESS_TOKEN to upload wall photos", async () => {
     const client = new VkClient({
       communityToken: "community-token",

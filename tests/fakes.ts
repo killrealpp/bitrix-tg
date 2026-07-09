@@ -2,10 +2,12 @@ import type {
   DbGateway,
   PersistPostInput,
   PersistTelegramMessageInput,
+  PersistVkOauthTokenInput,
   SocialPublicationTarget,
   StoredBitrixPost,
   StoredSocialPublication,
   StoredTelegramMessage,
+  StoredVkOauthToken,
   UpdatePostPatch,
   UpsertSocialPublicationInput
 } from "../src/db/DbGateway";
@@ -36,6 +38,7 @@ export class FakeDbGateway implements DbGateway {
   posts: StoredBitrixPost[] = [];
   messages: StoredTelegramMessage[] = [];
   socialPublications: StoredSocialPublication[] = [];
+  vkOauthToken: StoredVkOauthToken | null = null;
   private nextPostId = 1;
   private nextMessageRowId = 1;
   private nextSocialPublicationId = 1;
@@ -186,6 +189,28 @@ export class FakeDbGateway implements DbGateway {
     };
     this.socialPublications.push(publication);
     return publication;
+  }
+
+  async getVkOauthToken(): Promise<StoredVkOauthToken | null> {
+    return this.vkOauthToken;
+  }
+
+  async saveVkOauthToken(
+    input: PersistVkOauthTokenInput
+  ): Promise<StoredVkOauthToken> {
+    const now = new Date();
+    this.vkOauthToken = {
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      deviceId: input.deviceId,
+      userId: input.userId ?? null,
+      scope: input.scope ?? null,
+      expiresAt: input.expiresAt,
+      createdAt: this.vkOauthToken?.createdAt ?? now,
+      updatedAt: now
+    };
+
+    return this.vkOauthToken;
   }
 
   async close(): Promise<void> {}

@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import Fastify from "fastify";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { loadConfig, type AppConfig } from "./config";
 import {
   BitrixWebhookParseError,
@@ -30,6 +30,10 @@ import { createOpenRouterTextFit } from "./text/openRouterTextFit";
 import { shouldUseAiPrompt } from "./text/socialText";
 import { MaxClient } from "./social/maxClient";
 import type { ExternalSocialPublisher, ExternalSocialTarget } from "./social/types";
+import {
+  VkOAuthTokenService,
+  type VkUserAccessTokenProvider
+} from "./social/vkOAuth";
 import { VkClient } from "./social/vkClient";
 import {
   TelegramBotApiClient,
@@ -59,11 +63,20 @@ export interface BuildAppDeps {
       | "maxToken"
       | "vkToken"
       | "vkAccessToken"
+      | "vkClientId"
+      | "vkRedirectUri"
+      | "vkServiceToken"
+      | "vkOAuthScope"
+      | "vkOAuthAuthUrl"
+      | "vkOAuthTokenUrl"
+      | "vkOAuthAdminSecret"
+      | "vkOAuthTokenRefreshSkewMs"
       | "debugSaveIncomingWebhook"
       | "debugWebhookDumpPath"
     >
   >;
   textFit?: TextFitOptions;
+  vkOAuth?: VkOAuthTokenService;
 }
 
 const WEBHOOK_SECRET_HEADER = "x-webhook-secret";
@@ -89,6 +102,58 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
   });
 
   app.get("/health", async () => "OK");
+
+  app.get("/admin/vk/oauth/start", async (request, reply) => {
+    if (!deps.vkOAuth) {
+      return reply.code(503).send({
+        ok: false,
+        error: "vk_oauth_not_configured",
+        message: "Set VK_CLIENT_ID and VK_REDIRECT_URI before starting VK OAuth."
+      });
+    }
+
+    if (!isValidAdminSecret(request, deps.config.vkOAuthAdminSecret)) {
+      return reply.code(401).send({
+        ok: false,
+        error: "unauthorized"
+      });
+    }
+
+    return reply.redirect(deps.vkOAuth.createAuthorizationUrl());
+  });
+
+  app.get("/admin/vk/oauth/callback", async (request, reply) => {
+    if (!deps.vkOAuth) {
+      return reply.code(503).send({
+        ok: false,
+        error: "vk_oauth_not_configured",
+        message: "Set VK_CLIENT_ID and VK_REDIRECT_URI before handling VK OAuth."
+      });
+    }
+
+    try {
+      const token = await deps.vkOAuth.handleCallback(
+        request.query as Record<string, unknown>
+      );
+      return reply.type("text/html; charset=utf-8").send(
+        [
+          "<!doctype html>",
+          "<meta charset=\"utf-8\">",
+          "<title>VK authorization saved</title>",
+          "<h1>VK authorization saved</h1>",
+          `<p>Access token is valid until ${escapeHtml(token.expiresAt.toISOString())}.</p>`,
+          "<p>You can close this tab.</p>"
+        ].join("")
+      );
+    } catch (error) {
+      const message = redactSensitiveText(getErrorMessage(error), logSecrets);
+      app.log.warn({ error: message }, "VK OAuth callback failed");
+      return reply.code(400).send({
+        ok: false,
+        error: message
+      });
+    }
+  });
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(
@@ -334,6 +399,34 @@ function isValidWebhookSecret(
   return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
+function isValidAdminSecret(
+  request: FastifyRequest,
+  expected: string | undefined
+): boolean {
+  if (!expected) {
+    return true;
+  }
+
+  const provided =
+    getHeaderValue(request.headers["x-admin-secret"]) ??
+    getHeaderValue(request.headers[WEBHOOK_SECRET_HEADER]) ??
+    getQuerySecret(request.query);
+  return isValidWebhookSecret(provided, expected);
+}
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function getQuerySecret(query: unknown): string | undefined {
+  if (!query || typeof query !== "object") {
+    return undefined;
+  }
+
+  const value = (query as Record<string, unknown>).secret;
+  return typeof value === "string" ? value : undefined;
+}
+
 export async function startServer(): Promise<void> {
   const config = loadConfig(process.env, { requireTelegram: true });
   const logSecrets = getLogSecrets(config);
@@ -363,7 +456,8 @@ export async function startServer(): Promise<void> {
   const adminNotifier = adminTelegram
     ? new TelegramScheduledFailureAdminNotifier(adminTelegram)
     : undefined;
-  const externalPublishers = buildExternalPublishers(config);
+  const vkOAuth = buildVkOAuth(config, db);
+  const externalPublishers = buildExternalPublishers(config, vkOAuth);
   const photoResolver = config.bitrixFileResolverUrl
     ? new HttpBitrixPhotoResolver({
         endpointUrl: config.bitrixFileResolverUrl
@@ -386,6 +480,7 @@ export async function startServer(): Promise<void> {
     adminNotifier,
     photoResolver,
     textFit,
+    vkOAuth,
     config
   });
 
@@ -435,7 +530,9 @@ if (require.main === module) {
         process.env.OPENROUTER_API_KEY,
         process.env.MAX_TOKEN,
         process.env.VK_TOKEN,
-        process.env.VK_ACCESS_TOKEN
+        process.env.VK_ACCESS_TOKEN,
+        process.env.VK_SERVICE_TOKEN,
+        process.env.VK_OAUTH_ADMIN_SECRET
       ])
     );
     process.exit(1);
@@ -519,7 +616,8 @@ function getLogSecrets(
     Pick<
       AppConfig,
       "telegramBotToken" | "webhookSecret" | "openAiApiKey" | "openRouterApiKey"
-      | "maxToken" | "vkToken" | "vkAccessToken"
+      | "maxToken" | "vkToken" | "vkAccessToken" | "vkServiceToken"
+      | "vkOAuthAdminSecret"
     >
   >
 ): string[] {
@@ -530,14 +628,37 @@ function getLogSecrets(
     config.openRouterApiKey,
     config.maxToken,
     config.vkToken,
-    config.vkAccessToken
+    config.vkAccessToken,
+    config.vkServiceToken,
+    config.vkOAuthAdminSecret
   ].filter(
     (value): value is string => Boolean(value)
   );
 }
 
+function buildVkOAuth(
+  config: AppConfig,
+  db: DbGateway
+): VkOAuthTokenService | undefined {
+  if (!config.vkClientId || !config.vkRedirectUri) {
+    return undefined;
+  }
+
+  return new VkOAuthTokenService({
+    db,
+    clientId: config.vkClientId,
+    redirectUri: config.vkRedirectUri,
+    serviceToken: config.vkServiceToken,
+    scope: config.vkOAuthScope,
+    authUrl: config.vkOAuthAuthUrl,
+    tokenUrl: config.vkOAuthTokenUrl,
+    refreshSkewMs: config.vkOAuthTokenRefreshSkewMs
+  });
+}
+
 function buildExternalPublishers(
-  config: AppConfig
+  config: AppConfig,
+  vkAccessTokenProvider?: VkUserAccessTokenProvider
 ): Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> {
   const publishers: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> = {};
 
@@ -554,6 +675,7 @@ function buildExternalPublishers(
     publishers.vk = new VkClient({
       communityToken: config.vkToken,
       userAccessToken: config.vkAccessToken,
+      userAccessTokenProvider: vkAccessTokenProvider,
       groupId: config.vkGroupId,
       apiVersion: config.vkApiVersion,
       postAsGroup: config.vkPostAsGroup,
@@ -562,4 +684,16 @@ function buildExternalPublishers(
   }
 
   return publishers;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

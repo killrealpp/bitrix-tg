@@ -77,6 +77,18 @@ const EnvSchema = z.object({
   MAX_API_BASE_URL: z.string().url().default("https://platform-api2.max.ru"),
   VK_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
   VK_ACCESS_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  VK_SERVICE_TOKEN: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_OAUTH_SCOPE: z.string().default("wall photos groups"),
+  VK_OAUTH_AUTH_URL: z.string().url().default("https://id.vk.ru/authorize"),
+  VK_OAUTH_TOKEN_URL: z.string().url().default("https://id.vk.ru/oauth2/auth"),
+  VK_OAUTH_ADMIN_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  VK_OAUTH_TOKEN_REFRESH_SKEW_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(300),
   VK_GROUP_ID: z.preprocess(emptyToUndefined, z.string().optional()),
   VK_API_VERSION: z.string().default("5.199"),
   VK_POST_AS_GROUP: booleanFromEnv(true),
@@ -160,6 +172,14 @@ export function loadConfig(
     maxApiBaseUrl: parsed.MAX_API_BASE_URL,
     vkToken: parsed.VK_TOKEN,
     vkAccessToken: parsed.VK_ACCESS_TOKEN,
+    vkClientId: parsed.VK_CLIENT_ID,
+    vkRedirectUri: parsed.VK_REDIRECT_URI,
+    vkServiceToken: parsed.VK_SERVICE_TOKEN,
+    vkOAuthScope: parsed.VK_OAUTH_SCOPE,
+    vkOAuthAuthUrl: parsed.VK_OAUTH_AUTH_URL,
+    vkOAuthTokenUrl: parsed.VK_OAUTH_TOKEN_URL,
+    vkOAuthAdminSecret: parsed.VK_OAUTH_ADMIN_SECRET,
+    vkOAuthTokenRefreshSkewMs: parsed.VK_OAUTH_TOKEN_REFRESH_SKEW_SECONDS * 1000,
     vkGroupId: parsed.VK_GROUP_ID,
     vkApiVersion: parsed.VK_API_VERSION,
     vkPostAsGroup: parsed.VK_POST_AS_GROUP,
