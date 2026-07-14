@@ -117,7 +117,7 @@ function bitrixTgBuildPayload(int $elementId, string $action): ?array
     $publishSocial = bitrixTgPropertyTruthy($master);
     $publishTargets = [
         "telegram" => $publishSocial && bitrixTgPropertyTruthy($telegram),
-        "vk" => $publishSocial && bitrixTgPropertyTruthy($vk),
+        "vk" => false,
         "max" => $publishSocial && bitrixTgPropertyTruthy($max),
     ];
     $postTypeRaw = bitrixTgPropertyDisplayValue($postType) ?: (string)($section["name"] ?? "");

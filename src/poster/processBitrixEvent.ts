@@ -296,7 +296,7 @@ function shouldPublishAsNew(existing: StoredBitrixPost | null): boolean {
 }
 
 function hasAnyPublishTarget(event: ParsedBitrixEvent): boolean {
-  return event.publishTargets.telegram || event.publishTargets.vk || event.publishTargets.max;
+  return event.publishTargets.telegram || event.publishTargets.max;
 }
 
 async function isPublicationAlreadySatisfied(
@@ -704,7 +704,7 @@ async function notifySocialFailure(
 }
 
 function externalTargets(): ExternalSocialTarget[] {
-  return ["vk", "max"];
+  return ["max"];
 }
 
 function summarizeStatuses(statuses: ProcessStatus[]): ProcessStatus {

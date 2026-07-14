@@ -292,10 +292,7 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
         readFirstValue(explicitTargets, ["telegram", "TELEGRAM", "tg", "TG"]),
         false
       ),
-      vk: checkboxValueToBoolean(
-        readFirstValue(explicitTargets, ["vk", "VK", "vkontakte", "VKONTAKTE"]),
-        false
-      ),
+      vk: false,
       max: checkboxValueToBoolean(
         readFirstValue(explicitTargets, ["max", "MAX"]),
         false
@@ -382,7 +379,7 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
 
   return {
     telegram: checkboxValueToBoolean(telegram, true),
-    vk: checkboxValueToBoolean(vk, false),
+    vk: false,
     max: checkboxValueToBoolean(max, false)
   };
 }
@@ -390,7 +387,7 @@ function normalizePublishTargets(body: Record<string, unknown>): PublishTargets 
 function defaultPublishTargets(value: boolean): PublishTargets {
   return {
     telegram: value,
-    vk: value,
+    vk: false,
     max: value
   };
 }

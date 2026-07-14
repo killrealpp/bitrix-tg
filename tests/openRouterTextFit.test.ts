@@ -148,4 +148,55 @@ describe("OpenRouterTextFitter", () => {
     expect(userMessage.content).toContain("Не переписывай текст как акцию");
     expect(userMessage.content).not.toContain("Новость компании");
   });
+
+  it.each([
+    ["event", "Событие"],
+    ["promo", "Акция"],
+    ["company_news", "Новость компании"]
+  ] as const)("uses the business SMM prompt for %s posts", async (postType, marker) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Готовый SMM-пост"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+    const fitter = new OpenRouterTextFitter({
+      apiKey: "openrouter-secret",
+      model: "openai/gpt-4.1-mini",
+      fetchImpl: fetchMock
+    });
+
+    await fitter.prepareSocialPost({
+      text: "Исходный текст",
+      postType,
+      target: 1000,
+      title: "Заголовок",
+      previewText: "Анонс",
+      detailText: "Подробный текст",
+      scheduledAtRawValue: "10.07.2026 12:00:00",
+      url: "https://example.com/news"
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    const userMessage = body.messages.find(
+      (message: { role: string }) => message.role === "user"
+    );
+    expect(userMessage.content).toContain(`Формат: «${marker}»`);
+    expect(userMessage.content).toContain("Лимит: не более 1000 символов");
+    expect(userMessage.content).toContain("Заголовок: Заголовок");
+    expect(userMessage.content).toContain("Ссылка на источник: https://example.com/news");
+  });
 });

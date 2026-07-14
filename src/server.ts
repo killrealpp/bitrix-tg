@@ -34,7 +34,6 @@ import {
   VkOAuthTokenService,
   type VkUserAccessTokenProvider
 } from "./social/vkOAuth";
-import { VkClient } from "./social/vkClient";
 import {
   TelegramBotApiClient,
   type TelegramClient
@@ -456,7 +455,7 @@ export async function startServer(): Promise<void> {
   const adminNotifier = adminTelegram
     ? new TelegramScheduledFailureAdminNotifier(adminTelegram)
     : undefined;
-  const vkOAuth = buildVkOAuth(config, db);
+  const vkOAuth: VkOAuthTokenService | undefined = undefined;
   const externalPublishers = buildExternalPublishers(config, vkOAuth);
   const photoResolver = config.bitrixFileResolverUrl
     ? new HttpBitrixPhotoResolver({
@@ -658,7 +657,7 @@ function buildVkOAuth(
 
 function buildExternalPublishers(
   config: AppConfig,
-  vkAccessTokenProvider?: VkUserAccessTokenProvider
+  _vkAccessTokenProvider?: VkUserAccessTokenProvider
 ): Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> {
   const publishers: Partial<Record<ExternalSocialTarget, ExternalSocialPublisher>> = {};
 
@@ -667,18 +666,6 @@ function buildExternalPublishers(
       token: config.maxToken,
       chatId: config.maxChatId,
       apiBaseUrl: config.maxApiBaseUrl,
-      photoDownloadTimeoutMs: config.telegramPhotoDownloadTimeoutMs
-    });
-  }
-
-  if (config.vkToken && config.vkGroupId) {
-    publishers.vk = new VkClient({
-      communityToken: config.vkToken,
-      userAccessToken: config.vkAccessToken,
-      userAccessTokenProvider: vkAccessTokenProvider,
-      groupId: config.vkGroupId,
-      apiVersion: config.vkApiVersion,
-      postAsGroup: config.vkPostAsGroup,
       photoDownloadTimeoutMs: config.telegramPhotoDownloadTimeoutMs
     });
   }

@@ -455,5 +455,5 @@ async function publishStoredPost(
 }
 
 function externalTargets(): ExternalSocialTarget[] {
-  return ["vk", "max"];
+  return ["max"];
 }

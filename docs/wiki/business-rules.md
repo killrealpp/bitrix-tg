@@ -138,6 +138,11 @@ chat is configured.
 
 ## 2026-06-26 / Multi-Social Publishing Rules
 
+2026-07-14 update: VK publishing is disabled. The active targets are Telegram
+and MAX. Incoming `publish_targets.vk`, legacy `publish_vk`, and
+`pub_news_vkpost` values are normalized to `false` and do not create, delete, or
+retry VK publications.
+
 The Bitrix master checkbox is now authoritative. Canonical webhook field:
 `publish_social`. If it is false/empty, the service does not create new posts,
 cancels scheduled rows, and deletes already published targets where stored refs
@@ -149,7 +154,7 @@ Per-target canonical fields live in `publish_targets`:
 {
   "publish_targets": {
     "telegram": true,
-    "vk": true,
+    "vk": false,
     "max": true
   }
 }

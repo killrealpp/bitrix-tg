@@ -145,7 +145,7 @@ the JSON body:
   "publish_social": true,
   "publish_targets": {
     "telegram": true,
-    "vk": true,
+    "vk": false,
     "max": true
   },
   "post_type": "company_news",
@@ -166,6 +166,10 @@ the JSON body:
 `publish_social` is the master switch. If it is false, individual target flags
 are ignored.
 
+2026-07-14 update: VK publishing is disabled. The parser keeps the `vk` key for
+backward-compatible payload shape, but it normalizes incoming VK flags to
+`false`. The active publication targets are Telegram and MAX.
+
 `post_type` is normalized to one of:
 
 - `event`
@@ -183,6 +187,8 @@ signal.
 The parser still accepts legacy/fallback aliases in `all_properties`, including
 `pub_news_social`, `publish_telegram`, `pub_news_tg`, `publish_vk`,
 `pub_news_vkpost`, `publish_max`, `social_post_type`, and `section_name`.
+VK aliases are accepted only so old Bitrix payloads stay parseable; they no
+longer enable VK publication.
 `property_meta` is diagnostic: it helps confirm the real Bitrix property
 codes/names without exposing secrets.
 

@@ -1500,7 +1500,7 @@ describe("processBitrixEvent", () => {
     expect(db.messages).toHaveLength(1);
   });
 
-  it("publishes selected Telegram, VK, and MAX targets with prepared AI text", async () => {
+  it("publishes selected Telegram and MAX targets while ignoring VK", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1539,12 +1539,8 @@ describe("processBitrixEvent", () => {
     expect(result.status).toBe("published");
     expect(aiCalls).toHaveLength(1);
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
-    expect(vk.publishCalls[0]).toMatchObject({
-      text: "AI prepared social post",
-      photos: productionPhotos()
-    });
     expect(max.publishCalls[0]).toMatchObject({
       text: "AI prepared social post",
       photos: productionPhotos()
@@ -1554,18 +1550,17 @@ describe("processBitrixEvent", () => {
       postType: "company_news",
       publishTargets: {
         telegram: true,
-        vk: true,
+        vk: false,
         max: true
       }
     });
     expect(db.socialPublications.map((publication) => publication.target).sort()).toEqual([
       "max",
-      "telegram",
-      "vk"
+      "telegram"
     ]);
   });
 
-  it("formats unknown multi-photo posts with AI and publishes them to all selected targets", async () => {
+  it("formats unknown multi-photo posts with AI and publishes them to Telegram and MAX", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1613,10 +1608,7 @@ describe("processBitrixEvent", () => {
       caption: "✨ Строка 1\n\nСтрока 2",
       photos: productionPhotos()
     });
-    expect(vk.publishCalls[0]).toMatchObject({
-      text: "✨ Строка 1\n\nСтрока 2",
-      photos: productionPhotos()
-    });
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls[0]).toMatchObject({
       text: "✨ Строка 1\n\nСтрока 2",
       photos: productionPhotos()
@@ -1628,7 +1620,7 @@ describe("processBitrixEvent", () => {
     });
   });
 
-  it("does not duplicate Telegram, VK, or MAX on identical repeated webhooks", async () => {
+  it("does not duplicate Telegram or MAX on identical repeated webhooks", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1660,11 +1652,11 @@ describe("processBitrixEvent", () => {
 
     expect(second.status).toBe("unchanged");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
   });
 
-  it("edits Telegram text but does not republish VK or MAX when content changes", async () => {
+  it("edits Telegram text but does not republish MAX when content changes", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1709,14 +1701,12 @@ describe("processBitrixEvent", () => {
 
     expect(result.status).toBe("edited");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText", "editText"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
-    expect(db.socialPublications.find((item) => item.target === "vk")?.sentText).toBe(
-      "✨ First social text"
-    );
+    expect(db.socialPublications.find((item) => item.target === "vk")).toBeUndefined();
   });
 
-  it("publishes a newly enabled VK target once without touching existing Telegram", async () => {
+  it("ignores a newly enabled VK target without touching existing Telegram", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1758,15 +1748,13 @@ describe("processBitrixEvent", () => {
       externalPublishers: { vk }
     });
 
-    expect(result.status).toBe("published");
+    expect(result.status).toBe("unchanged");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
-    expect(vk.publishCalls).toHaveLength(1);
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
-      status: "published"
-    });
+    expect(vk.publishCalls).toHaveLength(0);
+    expect(db.socialPublications.find((item) => item.target === "vk")).toBeUndefined();
   });
 
-  it("continues publishing MAX when VK publish fails and stores the VK error", async () => {
+  it("publishes MAX and ignores a failing VK publisher", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1794,28 +1782,18 @@ describe("processBitrixEvent", () => {
       adminNotifier
     });
 
-    expect(result.status).toBe("failed");
+    expect(result.status).toBe("published");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
-      status: "failed",
-      lastError: "VK access token was given to another ip address"
-    });
+    expect(db.socialPublications.find((item) => item.target === "vk")).toBeUndefined();
     expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
       status: "published"
     });
-    expect(adminNotifier.socialPublicationCalls).toEqual([
-      {
-        bitrixId: 47,
-        target: "vk",
-        error: "VK access token was given to another ip address",
-        action: "publish"
-      }
-    ]);
+    expect(adminNotifier.socialPublicationCalls).toEqual([]);
   });
 
-  it("deletes unchecked social targets while keeping still-selected targets", async () => {
+  it("deletes unchecked MAX target while keeping still-selected Telegram", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1833,15 +1811,15 @@ describe("processBitrixEvent", () => {
         name: "Target removal"
       }
     });
-    const [withoutVk] = parseBitrixWebhook({
+    const [withoutMax] = parseBitrixWebhook({
       body: {
         element_id: 44,
         active: "Y",
         publish_social: "Y",
         publish_targets: {
           telegram: "Y",
-          vk: "N",
-          max: "Y"
+          vk: "Y",
+          max: "N"
         },
         name: "Target removal"
       }
@@ -1852,7 +1830,7 @@ describe("processBitrixEvent", () => {
       telegram,
       externalPublishers: { vk, max }
     });
-    const result = await processBitrixEvent(withoutVk, {
+    const result = await processBitrixEvent(withoutMax, {
       db,
       telegram,
       externalPublishers: { vk, max }
@@ -1860,22 +1838,19 @@ describe("processBitrixEvent", () => {
 
     expect(result.status).toBe("deleted");
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendText"]);
-    expect(vk.deleteCalls).toEqual([
+    expect(vk.deleteCalls).toHaveLength(0);
+    expect(max.deleteCalls).toEqual([
       {
-        externalId: "vk-1",
-        externalChatId: "vk-chat"
+        externalId: "max-1",
+        externalChatId: "max-chat"
       }
     ]);
-    expect(max.deleteCalls).toHaveLength(0);
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
-      status: "deleted"
-    });
     expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
-      status: "published"
+      status: "deleted"
     });
   });
 
-  it("master social checkbox deletes already published Telegram, VK, and MAX refs", async () => {
+  it("master social checkbox deletes already published Telegram and MAX refs", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -1926,7 +1901,7 @@ describe("processBitrixEvent", () => {
       "sendText",
       "deleteMessage"
     ]);
-    expect(vk.deleteCalls).toHaveLength(1);
+    expect(vk.deleteCalls).toHaveLength(0);
     expect(max.deleteCalls).toHaveLength(1);
   });
 
@@ -1934,7 +1909,7 @@ describe("processBitrixEvent", () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const adminNotifier = new FakeMissingScheduleTimeAdminNotifier();
-    const vk = new FakeExternalPublisher("vk");
+    const max = new FakeExternalPublisher("max");
     const [enabled] = parseBitrixWebhook({
       body: {
         element_id: 46,
@@ -1943,7 +1918,7 @@ describe("processBitrixEvent", () => {
         publish_targets: {
           telegram: "N",
           vk: "Y",
-          max: "N"
+          max: "Y"
         },
         name: "Delete failure"
       }
@@ -1965,27 +1940,27 @@ describe("processBitrixEvent", () => {
     await processBitrixEvent(enabled, {
       db,
       telegram,
-      externalPublishers: { vk }
+      externalPublishers: { max }
     });
-    vk.failDelete = new Error("VK token lacks wall delete rights");
+    max.failDelete = new Error("MAX token lacks delete rights");
     const result = await processBitrixEvent(disabled, {
       db,
       telegram,
-      externalPublishers: { vk },
+      externalPublishers: { max },
       adminNotifier
     });
 
     expect(result.status).toBe("failed");
-    expect(result.error).toBe("VK token lacks wall delete rights");
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
+    expect(result.error).toBe("MAX token lacks delete rights");
+    expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
       status: "failed",
-      lastError: "VK token lacks wall delete rights"
+      lastError: "MAX token lacks delete rights"
     });
     expect(adminNotifier.socialPublicationCalls).toEqual([
       {
         bitrixId: 46,
-        target: "vk",
-        error: "VK token lacks wall delete rights",
+        target: "max",
+        error: "MAX token lacks delete rights",
         action: "delete"
       }
     ]);

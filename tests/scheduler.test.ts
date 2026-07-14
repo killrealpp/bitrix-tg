@@ -61,7 +61,7 @@ describe("scheduled publishing", () => {
     expect(thirdRun).toEqual({ checked: 0, published: 0, failed: 0 });
   });
 
-  it("stores and publishes Telegram, VK, and MAX scheduled targets together", async () => {
+  it("stores and publishes Telegram and MAX scheduled targets while ignoring VK", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
@@ -108,23 +108,21 @@ describe("scheduled publishing", () => {
     expect(scheduled.status).toBe("scheduled");
     expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
-    expect(vk.publishCalls[0].text).toBe("Prepared scheduled social post");
     expect(max.publishCalls[0].text).toBe("Prepared scheduled social post");
     expect(db.socialPublications.map((publication) => publication.target).sort()).toEqual([
       "max",
-      "telegram",
-      "vk"
+      "telegram"
     ]);
   });
 
-  it("does not duplicate Telegram when a scheduled external target fails and retries", async () => {
+  it("does not duplicate Telegram when scheduled MAX fails and retries", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
     const max = new FakeExternalPublisher("max");
-    vk.failPublish = new Error("VK temporary failure");
+    max.failPublish = new Error("MAX temporary failure");
     const [event] = parseBitrixWebhook({
       body: {
         element_id: 32,
@@ -176,7 +174,7 @@ describe("scheduled publishing", () => {
 
     expect(firstRun).toEqual({ checked: 1, published: 0, failed: 1 });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
-    expect(vk.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
     expect(db.posts[0]).toMatchObject({
       status: "scheduled",
@@ -189,29 +187,27 @@ describe("scheduled publishing", () => {
       status: "published",
       externalId: "100"
     });
+    expect(db.socialPublications.find((item) => item.target === "vk")).toBeUndefined();
     expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
-      status: "published"
-    });
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
       status: "failed",
-      lastError: "VK temporary failure"
+      lastError: "MAX temporary failure"
     });
     expect(failures).toEqual([
       {
         bitrixId: 32,
-        error: "VK: VK temporary failure",
+        error: "MAX: MAX temporary failure",
         retryCount: 1,
         willRetry: true,
         nextRetryAt: "2026-06-04T13:01:00.000Z",
         publishTargets: {
           telegram: true,
-          vk: true,
+          vk: false,
           max: true
         }
       }
     ]);
 
-    vk.failPublish = null;
+    max.failPublish = null;
     const secondRun = await runDuePosts({
       db,
       telegram,
@@ -221,10 +217,10 @@ describe("scheduled publishing", () => {
 
     expect(secondRun).toEqual({ checked: 1, published: 1, failed: 0 });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
-    expect(vk.publishCalls).toHaveLength(2);
-    expect(max.publishCalls).toHaveLength(1);
+    expect(vk.publishCalls).toHaveLength(0);
+    expect(max.publishCalls).toHaveLength(2);
     expect(db.posts[0].status).toBe("published");
-    expect(db.socialPublications.find((item) => item.target === "vk")).toMatchObject({
+    expect(db.socialPublications.find((item) => item.target === "max")).toMatchObject({
       status: "published"
     });
   });

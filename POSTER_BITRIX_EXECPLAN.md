@@ -46,6 +46,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-07-06 18:08+03:00) Diagnosed production logs for Bitrix element `181848`: `post_type: "Новинки"` now maps to the company-news AI prompt, AI preparation fallback is logged, and scheduled VK/MAX/TG partial failures emit per-post diagnostic logs instead of only aggregate `failed:1`.
 - [x] (2026-07-07 09:00+03:00) Added explicit AI preparation diagnostics: OpenRouter success logs now include `bitrixId`, `postType`, input/output length, target, truncation flag, and duration; empty AI responses are reported before deterministic fallback.
 - [x] (2026-07-08 20:15+03:00) Added VK OAuth authorization endpoints, SQLite token storage, and automatic user-token refresh for VK photo upload. `/admin/vk/oauth/start` now redirects an admin through VK ID, `/admin/vk/oauth/callback` stores `access_token`, rotated `refresh_token`, `device_id`, and `expires_at`, and VK photo publishing refreshes/retries once when VK reports an invalid user access token.
+- [x] (2026-07-14 09:45+03:00) Disabled VK as an active publication target. Incoming `publish_targets.vk`, `publish_vk`, and `pub_news_vkpost` values now normalize to `false`; the orchestrator, scheduler, and server publisher construction only use Telegram and MAX.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -298,6 +299,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: VK wall photo methods need a user access token, and the manually created access token expires too quickly for scheduled publication. Persisting the rotated `refresh_token` lets the service refresh access before publishing without asking the operator to recreate tokens hourly. `VK_TOKEN` remains available for current community-token wall post/delete behavior.
   Date/Author: 2026-07-08 / Codex
 
+- Decision: Disable VK publication and keep only Telegram and MAX as active targets.
+  Rationale: Production is dropping VK. Keeping `vk` in the payload shape avoids breaking old Bitrix mappings, but normalizing it to `false` prevents VK publish/delete/retry attempts and removes VK token failures from the active flow.
+  Date/Author: 2026-07-14 / User + Codex
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -333,6 +338,8 @@ Additional verification on 2026-06-26 at 18:40+03:00: `npm run build` passed and
 Additional verification on 2026-07-06 at 18:08+03:00: `npm test -- --run` passed 164 tests in 14 files, and `npm run build` passed. New coverage proves that `Новинки` maps to `company_news`, AI preparation failures call a diagnostic hook before deterministic fallback, and scheduled external-target failures report Bitrix id, selected targets, retry state, next retry time, and redacted aggregate error.
 
 Additional verification on 2026-07-07 at 09:00+03:00: `npm test -- --run` passed 165 tests in 14 files, and `npm run build` passed. New coverage proves that every AI preparation request carries the Bitrix id for logging, empty AI responses are reported before deterministic fallback, and the server logs successful AI preparation without exposing secrets.
+
+Additional verification on 2026-07-14 at 09:45+03:00: targeted tests for parsing, orchestration, scheduling, and server routes passed 96 tests in 4 files, and `npm run build` passed. New coverage proves that VK target flags are ignored, VK fake publishers are not called, Telegram/MAX immediate and scheduled publication still work, and MAX retry does not duplicate Telegram.
 
 ## Context and Orientation
 

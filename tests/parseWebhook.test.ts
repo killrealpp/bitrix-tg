@@ -109,7 +109,7 @@ describe("parseBitrixWebhook", () => {
     expect(event.publishSocial).toBe(true);
     expect(event.publishTargets).toEqual({
       telegram: true,
-      vk: true,
+      vk: false,
       max: false
     });
     expect(event.postType).toBe("promo");
@@ -166,7 +166,7 @@ describe("parseBitrixWebhook", () => {
     expect(event.publishSocial).toBe(true);
     expect(event.publishTargets).toEqual({
       telegram: false,
-      vk: true,
+      vk: false,
       max: true
     });
     expect(event.postType).toBe("entertainment");
@@ -191,7 +191,7 @@ describe("parseBitrixWebhook", () => {
     expect(event.publishSocial).toBe(true);
     expect(event.publishTargets).toEqual({
       telegram: true,
-      vk: true,
+      vk: false,
       max: false
     });
     expect(event.postType).toBe("event");
