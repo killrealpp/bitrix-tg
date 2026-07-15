@@ -1,7 +1,7 @@
 import type { ParsedBitrixEvent, PostType } from "../bitrix/parseWebhook";
 import { truncateAtWord, type TextFitOptions } from "./fitText";
 
-export const SOCIAL_AI_TARGET = 1000;
+export const SOCIAL_AI_TARGET = 1200;
 
 export function shouldUseAiPrompt(_postType: PostType): boolean {
   return true;
@@ -107,6 +107,8 @@ function markerForPostType(postType: PostType): string {
       return "🔥";
     case "company_news":
       return "📢";
+    case "product_new":
+      return "🆕";
     case "entertainment":
       return "✨";
     default:

@@ -1601,7 +1601,7 @@ describe("processBitrixEvent", () => {
     expect(aiCalls).toHaveLength(1);
     expect(aiCalls[0]).toMatchObject({
       postType: "unknown",
-      target: 1000
+      target: 1200
     });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
     expect(telegram.calls[0].input).toMatchObject({

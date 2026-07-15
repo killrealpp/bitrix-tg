@@ -8,6 +8,7 @@ describe("prepareSocialText", () => {
     ["event", "event"],
     ["promo", "promo"],
     ["company news", "company_news"],
+    ["product new", "product_new"],
     ["entertainment", "entertainment"],
     ["unknown", "unknown"]
   ] satisfies Array<[string, PostType]>)(
@@ -26,7 +27,7 @@ describe("prepareSocialText", () => {
       expect(calls[0]).toMatchObject({
         bitrixId: 1,
         postType,
-        target: 1000
+        target: 1200
       });
     }
   );
@@ -55,7 +56,7 @@ describe("prepareSocialText", () => {
       aiPrepare: async () => "word ".repeat(400)
     });
 
-    expect(text.length).toBeLessThanOrEqual(1000);
+    expect(text.length).toBeLessThanOrEqual(1200);
     expect(text).toMatch(/^word/);
   });
 

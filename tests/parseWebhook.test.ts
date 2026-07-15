@@ -198,7 +198,7 @@ describe("parseBitrixWebhook", () => {
     expect(event.postTypeRaw).toBe("События");
   });
 
-  it("treats production Новинки post type as company news", () => {
+  it("treats production Новинки post type as a product-new post", () => {
     const [event] = parseBitrixWebhook({
       body: {
         element_id: "181848",
@@ -214,7 +214,7 @@ describe("parseBitrixWebhook", () => {
       }
     });
 
-    expect(event.postType).toBe("company_news");
+    expect(event.postType).toBe("product_new");
     expect(event.postTypeRaw).toBe("Новинки");
   });
 

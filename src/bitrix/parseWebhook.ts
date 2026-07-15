@@ -15,6 +15,7 @@ export type PostType =
   | "event"
   | "promo"
   | "company_news"
+  | "product_new"
   | "entertainment"
   | "unknown";
 
@@ -451,15 +452,15 @@ function normalizePostType(value: unknown): {
     return { postType: "promo", raw };
   }
 
+  if (/(новинк|new[_\s-]?product|product[_\s-]?new|новый\s+товар)/i.test(normalized)) {
+    return { postType: "product_new", raw };
+  }
+
   if (
-    /company[_\s-]?news|новост[ьи]\s+компан|новост[ьи]\s+магазин|корпоративн/i.test(
+    /company[_\s-]?news|новост[ьи]\s+компан|новост[ьи]\s+магазин|корпоративн|news|новост/i.test(
       normalized
     )
   ) {
-    return { postType: "company_news", raw };
-  }
-
-  if (/(news|новост|новинк)/i.test(normalized)) {
     return { postType: "company_news", raw };
   }
 

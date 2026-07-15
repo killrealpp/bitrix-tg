@@ -143,11 +143,12 @@ The service now accepts canonical Bitrix fields `publish_social`,
 social checkbox controls all targets. Telegram keeps edit/rebuild behavior,
 while VK and MAX are publish/delete only for the first multi-social release.
 
-OpenRouter now has SMM preparation prompts for `event`, `promo`, and
-`company_news` posts with a 1000-character target. `entertainment` and
-`unknown` posts skip AI and use deterministic formatting. The database has a new
-`social_publications` table for target-level state and new `bitrix_posts` fields
-for `post_type`, selected targets, and prepared text.
+At this milestone, OpenRouter gained SMM preparation prompts for `event`,
+`promo`, and `company_news` posts with a 1000-character target. This was later
+replaced by the 2026-07-15 client prompt set with `product_new` and a
+1200-character target. The database has a new `social_publications` table for
+target-level state and new `bitrix_posts` fields for `post_type`, selected
+targets, and prepared text.
 
 MAX publishing sends public image URLs as message attachments. VK publishing
 uploads wall photos with `VK_ACCESS_TOKEN` and posts to the group wall with
@@ -249,6 +250,19 @@ published to Telegram/VK/MAX with the prepared text and all photos.
 
 Verification: `npm test` passed 159 tests in 14 files and `npm run build`
 passed.
+
+## [2026-07-15 12:00+03:00] milestone | Client SMM prompts for Telegram and MAX
+
+The active SMM prompt text now lives in `src/text/socialPrompts.ts`. The service
+uses the client-approved templates for `promo`, `company_news`, `event`, and
+`product_new`, while `entertainment`/`unknown` keep the format-only prompt.
+`Новинки` is now normalized to `product_new` so product arrivals use the
+"Новинка товара" rules instead of the company-news rules.
+
+VK publication remains disabled. Prompt-level platform rules tell the AI that
+one prepared post is shared by Telegram and MAX, so it must not choose the VK
+CTA as the primary call to action. The shared AI preparation target is now 1200
+characters to match the supplied templates.
 
 ## [2026-07-01 15:02+03:00] milestone | VK photo upload transient retry
 

@@ -47,6 +47,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-07-07 09:00+03:00) Added explicit AI preparation diagnostics: OpenRouter success logs now include `bitrixId`, `postType`, input/output length, target, truncation flag, and duration; empty AI responses are reported before deterministic fallback.
 - [x] (2026-07-08 20:15+03:00) Added VK OAuth authorization endpoints, SQLite token storage, and automatic user-token refresh for VK photo upload. `/admin/vk/oauth/start` now redirects an admin through VK ID, `/admin/vk/oauth/callback` stores `access_token`, rotated `refresh_token`, `device_id`, and `expires_at`, and VK photo publishing refreshes/retries once when VK reports an invalid user access token.
 - [x] (2026-07-14 09:45+03:00) Disabled VK as an active publication target. Incoming `publish_targets.vk`, `publish_vk`, and `pub_news_vkpost` values now normalize to `false`; the orchestrator, scheduler, and server publisher construction only use Telegram and MAX.
+- [x] (2026-07-15 12:00+03:00) Replaced the social SMM prompts with the client-approved templates for `promo`, `company_news`, `event`, and `product_new`; moved prompt text into `src/text/socialPrompts.ts`, changed the AI preparation target to 1200 characters, and mapped Bitrix `Новинки` to `product_new`.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -280,12 +281,12 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Date/Author: 2026-06-26 / Codex
 
 - Decision: Run AI preparation for every post type, with different prompt modes.
-  Rationale: `event`, `promo`, and `company_news` use their business SMM prompts. `entertainment`, `unknown`, and any other non-business type use a format-only prompt that preserves the original meaning/facts and only adds light structure plus 1-3 relevant emoji.
+  Rationale: `event`, `promo`, `company_news`, and `product_new` use their business SMM prompts from `src/text/socialPrompts.ts`. `entertainment`, `unknown`, and any other non-business type use a format-only prompt that preserves the original meaning/facts and only adds light structure plus 1-3 relevant emoji.
   Date/Author: 2026-07-01 / User
 
-- Decision: Treat Bitrix `Новинки` as `company_news`.
-  Rationale: Production uses `Новинки` for a business/news-like item. Parsing it as `unknown` sends the format-only AI prompt and makes the resulting post look like AI did not apply the intended news prompt.
-  Date/Author: 2026-07-06 / Codex
+- Decision: Treat Bitrix `Новинки` as `product_new`.
+  Rationale: The client supplied a dedicated "Новинка товара" SMM prompt. Routing `Новинки` through `product_new` keeps product arrivals separate from company news and applies the correct CTA, price, and product-benefit rules.
+  Date/Author: 2026-07-15 / User + Codex
 
 - Decision: Log AI preparation fallback and per-post scheduled publication failures.
   Rationale: Operators need to distinguish "AI was expected" from "AI succeeded", and need the exact failed platform/error when a scheduled VK/MAX/TG publication is only partially successful.
@@ -340,6 +341,8 @@ Additional verification on 2026-07-06 at 18:08+03:00: `npm test -- --run` passed
 Additional verification on 2026-07-07 at 09:00+03:00: `npm test -- --run` passed 165 tests in 14 files, and `npm run build` passed. New coverage proves that every AI preparation request carries the Bitrix id for logging, empty AI responses are reported before deterministic fallback, and the server logs successful AI preparation without exposing secrets.
 
 Additional verification on 2026-07-14 at 09:45+03:00: targeted tests for parsing, orchestration, scheduling, and server routes passed 96 tests in 4 files, and `npm run build` passed. New coverage proves that VK target flags are ignored, VK fake publishers are not called, Telegram/MAX immediate and scheduled publication still work, and MAX retry does not duplicate Telegram.
+
+Additional verification on 2026-07-15 at 12:00+03:00: targeted prompt/type tests passed 41 tests in 3 files, full `npm test` passed 174 tests in 15 files, and `npm run build` passed. New coverage proves that the client SMM prompts are sent to OpenRouter for `event`, `promo`, `company_news`, and `product_new`, `Новинки` maps to `product_new`, the shared AI preparation target is 1200 characters, and VK remains disabled while Telegram/MAX publication paths continue to pass.
 
 ## Context and Orientation
 

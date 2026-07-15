@@ -175,6 +175,7 @@ backward-compatible payload shape, but it normalizes incoming VK flags to
 - `event`
 - `promo`
 - `company_news`
+- `product_new`
 - `entertainment`
 - `unknown`
 

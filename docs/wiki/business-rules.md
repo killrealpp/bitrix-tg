@@ -171,10 +171,11 @@ publication, it is published exactly once.
 
 Post type controls text preparation:
 
-- `event`, `promo`, `company_news` call OpenRouter with the matching SMM prompt
-  and target a post up to 1000 characters;
+- `event`, `promo`, `company_news`, and `product_new` call OpenRouter with the
+  matching SMM prompt from `src/text/socialPrompts.ts` and target a post up to
+  1200 characters;
 - `entertainment`, `unknown`, and any other non-business type call OpenRouter
   with a format-only prompt: preserve meaning and facts, add light structure and
-  1-3 relevant emoji, and do not turn the text into a sale/event/company-news
-  post;
+  1-3 relevant emoji, and do not turn the text into a sale/event/company-news or
+  product-new post;
 - all platform limits are enforced after preparation.

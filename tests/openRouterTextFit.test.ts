@@ -131,7 +131,7 @@ describe("OpenRouterTextFitter", () => {
     const result = await fitter.prepareSocialPost({
       text: "Обычный текст без категории",
       postType: "unknown",
-      target: 1000,
+      target: 1200,
       title: "Заголовок",
       previewText: "",
       detailText: "Обычный текст без категории",
@@ -146,13 +146,15 @@ describe("OpenRouterTextFitter", () => {
     );
     expect(userMessage.content).toContain("Легкое оформление");
     expect(userMessage.content).toContain("Не переписывай текст как акцию");
+    expect(userMessage.content).toContain("Соцсети публикации: Telegram и MAX");
     expect(userMessage.content).not.toContain("Новость компании");
   });
 
   it.each([
-    ["event", "Событие"],
-    ["promo", "Акция"],
-    ["company_news", "Новость компании"]
+    ["event", "формате «Событие»", "По вопросам участия"],
+    ["promo", "формате «Акция»", "Для заказа и консультации"],
+    ["company_news", "формате «Новость»", "По любым вопросам"],
+    ["product_new", "формате «Новинка товара»", "Для консультации и заказа"]
   ] as const)("uses the business SMM prompt for %s posts", async (postType, marker) => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -182,7 +184,7 @@ describe("OpenRouterTextFitter", () => {
     await fitter.prepareSocialPost({
       text: "Исходный текст",
       postType,
-      target: 1000,
+      target: 1200,
       title: "Заголовок",
       previewText: "Анонс",
       detailText: "Подробный текст",
@@ -194,8 +196,13 @@ describe("OpenRouterTextFitter", () => {
     const userMessage = body.messages.find(
       (message: { role: string }) => message.role === "user"
     );
-    expect(userMessage.content).toContain(`Формат: «${marker}»`);
-    expect(userMessage.content).toContain("Лимит: не более 1000 символов");
+    expect(userMessage.content).toContain(marker);
+    expect(userMessage.content).toContain("Длина поста: не более 1200 символов");
+    expect(userMessage.content).toContain("Лимит: не более 1200 символов");
+    expect(userMessage.content).toContain("Один итоговый текст используется сразу для Telegram и MAX");
+    expect(userMessage.content).toContain("ВК как канал публикации сейчас отключён");
+    expect(userMessage.content).toContain("Канал в MAX");
+    expect(userMessage.content).toContain("WhatsApp");
     expect(userMessage.content).toContain("Заголовок: Заголовок");
     expect(userMessage.content).toContain("Ссылка на источник: https://example.com/news");
   });
