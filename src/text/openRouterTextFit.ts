@@ -173,10 +173,10 @@ function buildSocialPostMessages(request: SocialTextPrepareRequest): Array<{
     {
       role: "user",
       content: [
-        getPromptForPostType(request.postType),
+        getPromptForPostType(request.postType, request.platform),
         "",
         `Лимит: не более ${request.target} символов.`,
-        "Соцсети публикации: Telegram и MAX.",
+        `Соцсеть публикации: ${request.platform === "telegram" ? "Telegram" : "MAX"}.`,
         "",
         "Исходные данные:",
         `Заголовок: ${request.title || "нет"}`,

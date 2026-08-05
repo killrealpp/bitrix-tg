@@ -17,6 +17,7 @@ import {
   fitForVkPost,
   type TextFitOptions
 } from "../text/fitText";
+import type { SocialTextPlatform } from "../text/socialPlatforms";
 import { redactSensitiveText } from "../security/redaction";
 import type {
   ExternalSocialPublisher,
@@ -182,6 +183,13 @@ function redactErrorMessage(error: unknown): string {
   return redactSensitiveText(error instanceof Error ? error.message : String(error));
 }
 
+function storedPlatformText(
+  post: StoredBitrixPost,
+  platform: SocialTextPlatform
+): string | null {
+  return post.preparedTexts[platform] ?? post.preparedText ?? null;
+}
+
 async function resolveStoredPostPhotos(
   post: StoredBitrixPost,
   photoResolver?: BitrixPhotoResolver
@@ -212,13 +220,19 @@ async function publishStoredPostToTargets(
   telegramText: string | null;
   telegramMessages: TelegramMessageRef[];
 }> {
-  const sourceText = post.preparedText ?? post.sourceText;
+  const telegramSourceText =
+    storedPlatformText(post, "telegram") ?? post.sourceText;
+  const maxSourceText = storedPlatformText(post, "max") ?? post.sourceText;
   let telegramKind: PublicationKind | null = null;
   let telegramText: string | null = null;
   let telegramMessages: TelegramMessageRef[] = [];
 
   if (post.publishTargets.telegram) {
-    const result = await publishOrReuseStoredTelegram(post, deps, sourceText);
+    const result = await publishOrReuseStoredTelegram(
+      post,
+      deps,
+      telegramSourceText
+    );
     telegramKind = result.telegramKind;
     telegramText = result.telegramText;
     telegramMessages = result.telegramMessages;
@@ -244,7 +258,10 @@ async function publishStoredPostToTargets(
     }
 
     try {
-      const text = target === "max" ? await fitForMaxText(sourceText) : await fitForVkPost(sourceText);
+      const text =
+        target === "max"
+          ? await fitForMaxText(maxSourceText)
+          : await fitForVkPost(maxSourceText);
       const result = await publisher.publish({
         bitrixId: post.bitrixId,
         text,
@@ -310,7 +327,7 @@ async function publishOrReuseStoredTelegram(
     post,
     deps.telegram,
     sourceText,
-    post.preparedText ? undefined : deps.textFit
+    storedPlatformText(post, "telegram") ? undefined : deps.textFit
   );
   const main = result.messages[0];
   if (main) {

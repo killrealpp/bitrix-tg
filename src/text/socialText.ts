@@ -1,5 +1,6 @@
 import type { ParsedBitrixEvent, PostType } from "../bitrix/parseWebhook";
 import { truncateAtWord, type TextFitOptions } from "./fitText";
+import type { SocialTextPlatform } from "./socialPlatforms";
 
 export const SOCIAL_AI_TARGET = 1200;
 
@@ -10,6 +11,7 @@ export function shouldUseAiPrompt(_postType: PostType): boolean {
 export async function prepareSocialText(
   event: ParsedBitrixEvent,
   sourceText: string,
+  platform: SocialTextPlatform,
   options: TextFitOptions = {}
 ): Promise<string> {
   const formatted = formatOnlyText(sourceText, event.postType);
@@ -24,6 +26,7 @@ export async function prepareSocialText(
         bitrixId: event.bitrixId,
         text: formatted,
         postType: event.postType,
+        platform,
         target: SOCIAL_AI_TARGET,
         title: event.title,
         previewText: event.previewText,
@@ -44,10 +47,11 @@ export async function prepareSocialText(
     await notifyAiPrepareFailure(
       event,
       options,
+      platform,
       new Error("AI social text preparation returned an empty response")
     );
   } catch (error) {
-    await notifyAiPrepareFailure(event, options, error);
+    await notifyAiPrepareFailure(event, options, platform, error);
     // Deterministic formatting keeps publication available if AI is unavailable.
   }
 
@@ -57,6 +61,7 @@ export async function prepareSocialText(
 async function notifyAiPrepareFailure(
   event: ParsedBitrixEvent,
   options: TextFitOptions,
+  platform: SocialTextPlatform,
   error: unknown
 ): Promise<void> {
   if (!options.onAiPrepareFailure) {
@@ -67,6 +72,7 @@ async function notifyAiPrepareFailure(
     await options.onAiPrepareFailure({
       bitrixId: event.bitrixId,
       postType: event.postType,
+      platform,
       error: error instanceof Error ? error.message : String(error)
     });
   } catch {

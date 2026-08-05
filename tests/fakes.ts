@@ -15,6 +15,7 @@ import type {
   BitrixPhotoResolver
 } from "../src/bitrix/photoResolver";
 import type { NormalizedPhoto } from "../src/bitrix/parseWebhook";
+import type { PreparedSocialTexts } from "../src/text/socialPlatforms";
 import type {
   EditCaptionInput,
   DeleteMessageInput,
@@ -60,6 +61,7 @@ export class FakeDbGateway implements DbGateway {
       sourceText: input.sourceText,
       telegramText: input.telegramText ?? null,
       preparedText: input.preparedText ?? null,
+      preparedTexts: normalizePreparedTexts(input.preparedTexts, input.preparedText),
       postType: input.postType ?? "unknown",
       publishTargets: input.publishTargets ?? {
         telegram: true,
@@ -214,6 +216,24 @@ export class FakeDbGateway implements DbGateway {
   }
 
   async close(): Promise<void> {}
+}
+
+function normalizePreparedTexts(
+  preparedTexts: PreparedSocialTexts | null | undefined,
+  legacyPreparedText: string | null | undefined
+): PreparedSocialTexts {
+  if (preparedTexts && Object.values(preparedTexts).some((value) => value !== undefined)) {
+    return preparedTexts;
+  }
+
+  if (legacyPreparedText) {
+    return {
+      telegram: legacyPreparedText,
+      max: legacyPreparedText
+    };
+  }
+
+  return {};
 }
 
 export class FakeTelegramClient implements TelegramClient {

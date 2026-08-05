@@ -1,4 +1,5 @@
 import type { PostType } from "../bitrix/parseWebhook";
+import type { SocialTextPlatform } from "./socialPlatforms";
 
 export const TELEGRAM_TEXT_LIMIT = 4096;
 export const TELEGRAM_CAPTION_LIMIT = 1024;
@@ -16,6 +17,7 @@ export interface SocialTextPrepareRequest {
   bitrixId: number;
   text: string;
   postType: PostType;
+  platform: SocialTextPlatform;
   target: number;
   title: string;
   previewText: string;
@@ -30,6 +32,7 @@ export interface TextFitOptions {
   onAiPrepareFailure?: (failure: {
     bitrixId: number;
     postType: PostType;
+    platform: SocialTextPlatform;
     error: string;
   }) => void | Promise<void>;
 }

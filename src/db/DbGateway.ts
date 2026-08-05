@@ -5,6 +5,7 @@ import type {
   PublishTargets
 } from "../bitrix/parseWebhook";
 import type { TelegramMessageRole } from "../telegram/client";
+import type { PreparedSocialTexts } from "../text/socialPlatforms";
 
 export type PostStatus = "ignored" | "scheduled" | "publishing" | "published" | "failed";
 export type PublicationKind = "text" | "photo" | "media_group" | "mixed";
@@ -22,6 +23,7 @@ export interface StoredBitrixPost {
   sourceText: string;
   telegramText: string | null;
   preparedText: string | null;
+  preparedTexts: PreparedSocialTexts;
   postType: PostType;
   publishTargets: PublishTargets;
   photos: NormalizedPhoto[];
@@ -43,6 +45,7 @@ export interface PersistPostInput {
   sourceText: string;
   telegramText?: string | null;
   preparedText?: string | null;
+  preparedTexts?: PreparedSocialTexts | null;
   postType?: PostType;
   publishTargets?: PublishTargets;
   photos: NormalizedPhoto[];

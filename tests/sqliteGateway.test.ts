@@ -27,6 +27,11 @@ describe("SqliteGateway", () => {
       publicationKind: "media_group",
       sourceText: "Album",
       telegramText: "Album",
+      preparedText: "Telegram Album",
+      preparedTexts: {
+        telegram: "Telegram Album",
+        max: "MAX Album"
+      },
       photos: [
         { url: "https://example.com/a.jpg" },
         { url: "https://example.com/b.jpg" }
@@ -57,6 +62,11 @@ describe("SqliteGateway", () => {
     const messages = await db.listTelegramMessages(post.id);
 
     expect(loaded?.publicationKind).toBe("media_group");
+    expect(loaded?.preparedText).toBe("Telegram Album");
+    expect(loaded?.preparedTexts).toEqual({
+      telegram: "Telegram Album",
+      max: "MAX Album"
+    });
     expect(loaded?.photos).toHaveLength(2);
     expect(loaded?.scheduledRetryCount).toBe(1);
     expect(loaded?.adminNotifiedAt?.toISOString()).toBe(

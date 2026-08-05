@@ -560,6 +560,7 @@ function withTextFitDiagnostics(
               {
                 bitrixId: request.bitrixId,
                 postType: request.postType,
+                platform: request.platform,
                 inputLength: request.text.length,
                 outputLength,
                 target: request.target,
@@ -584,6 +585,7 @@ function withTextFitDiagnostics(
         {
           bitrixId: failure.bitrixId,
           postType: failure.postType,
+          platform: failure.platform,
           error: redactSensitiveText(failure.error, logSecrets)
         },
         "AI social text preparation failed; using deterministic fallback"

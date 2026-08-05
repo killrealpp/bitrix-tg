@@ -48,6 +48,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-07-08 20:15+03:00) Added VK OAuth authorization endpoints, SQLite token storage, and automatic user-token refresh for VK photo upload. `/admin/vk/oauth/start` now redirects an admin through VK ID, `/admin/vk/oauth/callback` stores `access_token`, rotated `refresh_token`, `device_id`, and `expires_at`, and VK photo publishing refreshes/retries once when VK reports an invalid user access token.
 - [x] (2026-07-14 09:45+03:00) Disabled VK as an active publication target. Incoming `publish_targets.vk`, `publish_vk`, and `pub_news_vkpost` values now normalize to `false`; the orchestrator, scheduler, and server publisher construction only use Telegram and MAX.
 - [x] (2026-07-15 12:00+03:00) Replaced the social SMM prompts with the client-approved templates for `promo`, `company_news`, `event`, and `product_new`; moved prompt text into `src/text/socialPrompts.ts`, changed the AI preparation target to 1200 characters, and mapped Bitrix `Новинки` to `product_new`.
+- [x] (2026-08-05 08:55+03:00) Split SMM preparation by platform: Telegram and MAX now use separate prompt slots for `promo`, `company_news`, `event`, and `product_new`; scheduled posts persist per-platform prepared text in SQLite while `prepared_text` remains a legacy fallback.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -304,6 +305,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: Production is dropping VK. Keeping `vk` in the payload shape avoids breaking old Bitrix mappings, but normalizing it to `false` prevents VK publish/delete/retry attempts and removes VK token failures from the active flow.
   Date/Author: 2026-07-14 / User + Codex
 
+- Decision: Prepare and store Telegram/MAX SMM text separately.
+  Rationale: The client supplied platform-specific CTAs for the same four business themes. `prepared_texts_json` stores the Telegram and MAX variants for immediate and scheduled publication, while `prepared_text` remains readable for existing rows and legacy tooling.
+  Date/Author: 2026-08-05 / User + Codex
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -343,6 +348,8 @@ Additional verification on 2026-07-07 at 09:00+03:00: `npm test -- --run` passed
 Additional verification on 2026-07-14 at 09:45+03:00: targeted tests for parsing, orchestration, scheduling, and server routes passed 96 tests in 4 files, and `npm run build` passed. New coverage proves that VK target flags are ignored, VK fake publishers are not called, Telegram/MAX immediate and scheduled publication still work, and MAX retry does not duplicate Telegram.
 
 Additional verification on 2026-07-15 at 12:00+03:00: targeted prompt/type tests passed 41 tests in 3 files, full `npm test` passed 174 tests in 15 files, and `npm run build` passed. New coverage proves that the client SMM prompts are sent to OpenRouter for `event`, `promo`, `company_news`, and `product_new`, `Новинки` maps to `product_new`, the shared AI preparation target is 1200 characters, and VK remains disabled while Telegram/MAX publication paths continue to pass.
+
+Additional verification on 2026-08-05 at 08:55+03:00: targeted prompt/orchestration/scheduler/SQLite tests passed 84 tests in 5 files, full `npm test -- --run` passed 178 tests in 15 files, and `npm run build` passed. New coverage proves Telegram and MAX use separate prompt slots and CTA links for `event`, `promo`, `company_news`, and `product_new`; AI preparation requests carry `platform`; SQLite persists `prepared_texts_json` with legacy `prepared_text` fallback; immediate and scheduled Telegram/MAX publication use their own prepared text; and MAX retry does not duplicate Telegram.
 
 ## Context and Orientation
 

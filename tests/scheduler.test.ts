@@ -94,7 +94,10 @@ describe("scheduled publishing", () => {
       telegram,
       externalPublishers: { vk, max },
       textFit: {
-        aiPrepare: async () => "Prepared scheduled social post"
+        aiPrepare: async (request) =>
+          request.platform === "telegram"
+            ? "Prepared Telegram scheduled post"
+            : "Prepared MAX scheduled post"
       },
       now: new Date("2026-06-04T12:00:00.000Z")
     });
@@ -108,9 +111,16 @@ describe("scheduled publishing", () => {
     expect(scheduled.status).toBe("scheduled");
     expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
+    expect(telegram.calls[0].input).toMatchObject({
+      caption: "Prepared Telegram scheduled post"
+    });
     expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
-    expect(max.publishCalls[0].text).toBe("Prepared scheduled social post");
+    expect(max.publishCalls[0].text).toBe("Prepared MAX scheduled post");
+    expect(db.posts[0].preparedTexts).toEqual({
+      telegram: "Prepared Telegram scheduled post",
+      max: "Prepared MAX scheduled post"
+    });
     expect(db.socialPublications.map((publication) => publication.target).sort()).toEqual([
       "max",
       "telegram"
@@ -152,7 +162,8 @@ describe("scheduled publishing", () => {
       telegram,
       externalPublishers: { vk, max },
       textFit: {
-        aiPrepare: async () => "Prepared promo"
+        aiPrepare: async (request) =>
+          request.platform === "telegram" ? "Prepared Telegram promo" : "Prepared MAX promo"
       },
       now: new Date("2026-06-04T12:00:00.000Z")
     });
@@ -180,9 +191,10 @@ describe("scheduled publishing", () => {
       status: "scheduled",
       mainMessageId: 100,
       publicationKind: "photo",
-      telegramText: "Prepared promo",
+      telegramText: "Prepared Telegram promo",
       scheduledRetryCount: 1
     });
+    expect(max.publishCalls[0].text).toBe("Prepared MAX promo");
     expect(db.socialPublications.find((item) => item.target === "telegram")).toMatchObject({
       status: "published",
       externalId: "100"

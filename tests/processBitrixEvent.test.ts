@@ -1531,22 +1531,39 @@ describe("processBitrixEvent", () => {
       textFit: {
         aiPrepare: async (request) => {
           aiCalls.push(request);
-          return "AI prepared social post";
+          return `${request.platform} prepared social post`;
         }
       }
     });
 
     expect(result.status).toBe("published");
-    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls).toHaveLength(2);
+    expect(aiCalls).toEqual([
+      expect.objectContaining({
+        postType: "company_news",
+        platform: "telegram"
+      }),
+      expect.objectContaining({
+        postType: "company_news",
+        platform: "max"
+      })
+    ]);
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
+    expect(telegram.calls[0].input).toMatchObject({
+      caption: "telegram prepared social post"
+    });
     expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls).toHaveLength(1);
     expect(max.publishCalls[0]).toMatchObject({
-      text: "AI prepared social post",
+      text: "max prepared social post",
       photos: productionPhotos()
     });
     expect(db.posts[0]).toMatchObject({
-      preparedText: "AI prepared social post",
+      preparedText: "telegram prepared social post",
+      preparedTexts: {
+        telegram: "telegram prepared social post",
+        max: "max prepared social post"
+      },
       postType: "company_news",
       publishTargets: {
         telegram: true,
@@ -1592,29 +1609,43 @@ describe("processBitrixEvent", () => {
       textFit: {
         aiPrepare: async (request) => {
           aiCalls.push(request);
-          return "✨ Строка 1\n\nСтрока 2";
+          return request.platform === "telegram"
+            ? "✨ Telegram строка"
+            : "✨ MAX строка";
         }
       }
     });
 
     expect(result.status).toBe("published");
-    expect(aiCalls).toHaveLength(1);
-    expect(aiCalls[0]).toMatchObject({
-      postType: "unknown",
-      target: 1200
-    });
+    expect(aiCalls).toHaveLength(2);
+    expect(aiCalls).toEqual([
+      expect.objectContaining({
+        postType: "unknown",
+        platform: "telegram",
+        target: 1200
+      }),
+      expect.objectContaining({
+        postType: "unknown",
+        platform: "max",
+        target: 1200
+      })
+    ]);
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
     expect(telegram.calls[0].input).toMatchObject({
-      caption: "✨ Строка 1\n\nСтрока 2",
+      caption: "✨ Telegram строка",
       photos: productionPhotos()
     });
     expect(vk.publishCalls).toHaveLength(0);
     expect(max.publishCalls[0]).toMatchObject({
-      text: "✨ Строка 1\n\nСтрока 2",
+      text: "✨ MAX строка",
       photos: productionPhotos()
     });
     expect(db.posts[0]).toMatchObject({
-      preparedText: "✨ Строка 1\n\nСтрока 2",
+      preparedText: "✨ Telegram строка",
+      preparedTexts: {
+        telegram: "✨ Telegram строка",
+        max: "✨ MAX строка"
+      },
       postType: "unknown",
       publicationKind: "media_group"
     });

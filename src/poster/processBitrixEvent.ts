@@ -24,6 +24,10 @@ import {
   type TextFitOptions
 } from "../text/fitText";
 import { prepareSocialText } from "../text/socialText";
+import type {
+  PreparedSocialTexts,
+  SocialTextPlatform
+} from "../text/socialPlatforms";
 import { redactSensitiveText } from "../security/redaction";
 import type {
   ExternalSocialPublisher,
@@ -173,10 +177,14 @@ export async function processBitrixEvent(
     );
   }
 
-  const preparedText = await prepareSocialText(resolvedEvent, rawSourceText, deps.textFit);
+  const preparedTexts = await prepareSocialTexts(
+    resolvedEvent,
+    rawSourceText,
+    deps.textFit
+  );
 
   if (resolvedEvent.scheduledAt && resolvedEvent.scheduledAt.getTime() > now.getTime()) {
-    await upsertScheduledPost(resolvedEvent, deps.db, rawSourceText, preparedText, existing);
+    await upsertScheduledPost(resolvedEvent, deps.db, rawSourceText, preparedTexts, existing);
     return {
       status: "scheduled",
       bitrixId: resolvedEvent.bitrixId,
@@ -189,7 +197,7 @@ export async function processBitrixEvent(
       resolvedEvent,
       deps,
       rawSourceText,
-      preparedText,
+      preparedTexts,
       existing
     );
   } catch (error) {
@@ -226,6 +234,7 @@ async function failMissingExactTime(
     scheduledAt: event.scheduledAt,
     sourceText,
     preparedText: sourceText,
+    preparedTexts: rawPreparedTexts(sourceText),
     postType: event.postType,
     publishTargets: event.publishTargets,
     photos: event.photos,
@@ -299,6 +308,65 @@ function hasAnyPublishTarget(event: ParsedBitrixEvent): boolean {
   return event.publishTargets.telegram || event.publishTargets.max;
 }
 
+async function prepareSocialTexts(
+  event: ParsedBitrixEvent,
+  rawSourceText: string,
+  textFit?: TextFitOptions
+): Promise<PreparedSocialTexts> {
+  const preparedTexts: PreparedSocialTexts = {};
+
+  if (event.publishTargets.telegram) {
+    preparedTexts.telegram = await prepareSocialText(
+      event,
+      rawSourceText,
+      "telegram",
+      textFit
+    );
+  }
+
+  if (event.publishTargets.max) {
+    preparedTexts.max = await prepareSocialText(event, rawSourceText, "max", textFit);
+  }
+
+  return preparedTexts;
+}
+
+function platformText(
+  preparedTexts: PreparedSocialTexts,
+  platform: SocialTextPlatform,
+  fallback: string
+): string {
+  return preparedTexts[platform] ?? fallback;
+}
+
+function legacyPreparedText(preparedTexts: PreparedSocialTexts): string | null {
+  return preparedTexts.telegram ?? preparedTexts.max ?? null;
+}
+
+function preparedTextPatch(preparedTexts: PreparedSocialTexts): {
+  preparedText: string | null;
+  preparedTexts: PreparedSocialTexts;
+} {
+  return {
+    preparedText: legacyPreparedText(preparedTexts),
+    preparedTexts
+  };
+}
+
+function rawPreparedTexts(sourceText: string): PreparedSocialTexts {
+  return {
+    telegram: sourceText,
+    max: sourceText
+  };
+}
+
+function storedPlatformText(
+  post: StoredBitrixPost,
+  platform: SocialTextPlatform
+): string | null {
+  return post.preparedTexts[platform] ?? post.preparedText ?? null;
+}
+
 async function isPublicationAlreadySatisfied(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
@@ -334,26 +402,32 @@ async function publishOrSyncActiveEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   rawSourceText: string,
-  preparedText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost | null
 ): Promise<ProcessResult> {
   let workingPost = existing;
   const touched: ProcessStatus[] = [];
   const messageIds: number[] = [];
+  const telegramPreparedText = platformText(
+    preparedTexts,
+    "telegram",
+    rawSourceText
+  );
 
   if (event.publishTargets.telegram) {
     if (
       workingPost &&
       hasTelegramReference(workingPost) &&
       workingPost.status === "published" &&
-      workingPost.sourceText === preparedText &&
+      (storedPlatformText(workingPost, "telegram") ?? workingPost.sourceText) ===
+        telegramPreparedText &&
       photosEqual(workingPost.photos, event.photos)
     ) {
       workingPost = await deps.db.updatePost(workingPost.id, {
         status: "published",
         scheduledAt: event.scheduledAt,
-        sourceText: preparedText,
-        preparedText,
+        sourceText: telegramPreparedText,
+        ...preparedTextPatch(preparedTexts),
         postType: event.postType,
         publishTargets: event.publishTargets,
         photos: event.photos,
@@ -364,7 +438,13 @@ async function publishOrSyncActiveEvent(
       });
       await recordTelegramPublication(deps.db, workingPost, event.payloadHash);
     } else if (!workingPost || shouldPublishAsNew(workingPost)) {
-      const result = await publishNewEvent(event, deps, preparedText, workingPost);
+      const result = await publishNewEvent(
+        event,
+        deps,
+        telegramPreparedText,
+        preparedTexts,
+        workingPost
+      );
       touched.push(result.status);
       messageIds.push(...(result.messageIds ?? []));
       workingPost = await deps.db.findPostByBitrixId(event.bitrixId);
@@ -372,7 +452,13 @@ async function publishOrSyncActiveEvent(
         await recordTelegramPublication(deps.db, workingPost, event.payloadHash);
       }
     } else {
-      const result = await editExistingEvent(event, deps, preparedText, workingPost);
+      const result = await editExistingEvent(
+        event,
+        deps,
+        telegramPreparedText,
+        preparedTexts,
+        workingPost
+      );
       touched.push(result.status);
       messageIds.push(...(result.messageIds ?? []));
       workingPost = await deps.db.findPostByBitrixId(event.bitrixId);
@@ -385,7 +471,7 @@ async function publishOrSyncActiveEvent(
       event,
       deps.db,
       rawSourceText,
-      preparedText,
+      preparedTexts,
       workingPost
     );
     const deleted = await deleteTelegramTargetIfNeeded(event, deps, workingPost);
@@ -401,12 +487,18 @@ async function publishOrSyncActiveEvent(
       event,
       deps.db,
       rawSourceText,
-      preparedText,
+      preparedTexts,
       null
     );
   }
 
-  const externalResult = await syncExternalTargets(event, deps, workingPost, preparedText);
+  const externalResult = await syncExternalTargets(
+    event,
+    deps,
+    workingPost,
+    preparedTexts,
+    rawSourceText
+  );
   touched.push(...externalResult.statuses);
 
   const freshPost = await deps.db.findPostByBitrixId(event.bitrixId);
@@ -414,8 +506,8 @@ async function publishOrSyncActiveEvent(
     await deps.db.updatePost(freshPost.id, {
       status: "published",
       scheduledAt: event.scheduledAt,
-      sourceText: event.publishTargets.telegram ? preparedText : rawSourceText,
-      preparedText,
+      sourceText: event.publishTargets.telegram ? telegramPreparedText : rawSourceText,
+      ...preparedTextPatch(preparedTexts),
       postType: event.postType,
       publishTargets: event.publishTargets,
       photos: event.photos,
@@ -439,14 +531,14 @@ async function upsertPostWithoutTelegram(
   event: ParsedBitrixEvent,
   db: DbGateway,
   rawSourceText: string,
-  preparedText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost | null
 ): Promise<StoredBitrixPost> {
   const patch = {
     status: "publishing" as const,
     scheduledAt: event.scheduledAt,
     sourceText: rawSourceText,
-    preparedText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     photos: event.photos,
@@ -494,7 +586,8 @@ async function syncExternalTargets(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   post: StoredBitrixPost,
-  preparedText: string
+  preparedTexts: PreparedSocialTexts,
+  rawSourceText: string
 ): Promise<{ statuses: ProcessStatus[] }> {
   const statuses: ProcessStatus[] = [];
   const failures: string[] = [];
@@ -529,7 +622,15 @@ async function syncExternalTargets(
     }
 
     try {
-      const text = target === "max" ? await fitForMaxText(preparedText) : await fitForVkPost(preparedText);
+      const targetPreparedText = platformText(
+        preparedTexts,
+        target as SocialTextPlatform,
+        rawSourceText
+      );
+      const text =
+        target === "max"
+          ? await fitForMaxText(targetPreparedText)
+          : await fitForVkPost(targetPreparedText);
       const result = await publisher.publish({
         bitrixId: event.bitrixId,
         text,
@@ -813,6 +914,7 @@ async function failUnresolvedPhotos(
     scheduledAt: event.scheduledAt,
     sourceText,
     preparedText: sourceText,
+    preparedTexts: rawPreparedTexts(sourceText),
     postType: event.postType,
     publishTargets: event.publishTargets,
     photos: event.photos,
@@ -842,14 +944,14 @@ async function upsertScheduledPost(
   event: ParsedBitrixEvent,
   db: DbGateway,
   sourceText: string,
-  preparedText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost | null
 ): Promise<void> {
   const patch = {
     status: "scheduled" as const,
     scheduledAt: event.scheduledAt,
     sourceText,
-    preparedText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     photos: event.photos,
@@ -874,6 +976,7 @@ async function publishNewEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost | null
 ): Promise<ProcessResult> {
   const post =
@@ -882,7 +985,7 @@ async function publishNewEvent(
       bitrixId: event.bitrixId,
       status: "publishing",
       sourceText,
-      preparedText: sourceText,
+      ...preparedTextPatch(preparedTexts),
       postType: event.postType,
       publishTargets: event.publishTargets,
       photos: event.photos,
@@ -893,7 +996,7 @@ async function publishNewEvent(
     await deps.db.updatePost(existing.id, {
       status: "publishing",
       sourceText,
-      preparedText: sourceText,
+      ...preparedTextPatch(preparedTexts),
       postType: event.postType,
       publishTargets: event.publishTargets,
       photos: event.photos,
@@ -914,7 +1017,7 @@ async function publishNewEvent(
     publicationKind: published.kind,
     scheduledAt: event.scheduledAt,
     sourceText,
-    preparedText: sourceText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     telegramText: published.telegramText,
@@ -937,6 +1040,7 @@ async function editExistingEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost
 ): Promise<ProcessResult> {
   if (existing.publicationKind === "text" && event.photos.length === 0) {
@@ -954,7 +1058,7 @@ async function editExistingEvent(
     await deps.db.updatePost(existing.id, {
       status: "published",
       sourceText,
-      preparedText: sourceText,
+      ...preparedTextPatch(preparedTexts),
       postType: event.postType,
       publishTargets: event.publishTargets,
       telegramText,
@@ -975,7 +1079,7 @@ async function editExistingEvent(
   if (existing.publicationKind === "text" && event.photos.length > 0) {
     const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
     if (mediaSyncPolicy === "rebuild") {
-      return rebuildExistingEvent(event, deps, sourceText, existing);
+      return rebuildExistingEvent(event, deps, sourceText, preparedTexts, existing);
     }
 
     const extraMessages = await publishExtraPhotos(event.photos, deps.telegram);
@@ -987,7 +1091,7 @@ async function editExistingEvent(
       status: "published",
       publicationKind: "mixed",
       sourceText,
-      preparedText: sourceText,
+      ...preparedTextPatch(preparedTexts),
       postType: event.postType,
       publishTargets: event.publishTargets,
       photos: event.photos,
@@ -1005,11 +1109,11 @@ async function editExistingEvent(
   }
 
   if (existing.publicationKind === "mixed") {
-    return editMixedEvent(event, deps, sourceText, existing);
+    return editMixedEvent(event, deps, sourceText, preparedTexts, existing);
   }
 
   if (existing.publicationKind === "photo" || existing.publicationKind === "media_group") {
-    return editMediaEvent(event, deps, sourceText, existing);
+    return editMediaEvent(event, deps, sourceText, preparedTexts, existing);
   }
 
   throw new Error(`Unsupported edit path for publication kind ${existing.publicationKind}`);
@@ -1019,6 +1123,7 @@ async function editMixedEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost
 ): Promise<ProcessResult> {
   if (!existing.chatId || !existing.mainMessageId) {
@@ -1031,7 +1136,7 @@ async function editMixedEvent(
   const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
   const photosChanged = !photosEqual(existing.photos, event.photos);
   if (photosChanged && mediaSyncPolicy === "rebuild") {
-    return rebuildExistingEvent(event, deps, sourceText, existing);
+    return rebuildExistingEvent(event, deps, sourceText, preparedTexts, existing);
   }
 
   const telegramText = await fitForTelegramText(sourceText, deps.textFit);
@@ -1069,7 +1174,7 @@ async function editMixedEvent(
         ? "mixed"
         : "text",
     sourceText,
-    preparedText: sourceText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     telegramText,
@@ -1091,6 +1196,7 @@ async function editMediaEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost
 ): Promise<ProcessResult> {
   if (!existing.chatId || !existing.mainMessageId) {
@@ -1100,7 +1206,7 @@ async function editMediaEvent(
   const photosChanged = !photosEqual(existing.photos, event.photos);
   const mediaSyncPolicy = deps.mediaSyncPolicy ?? "rebuild";
   if (mediaSyncPolicy === "rebuild" && photosChanged) {
-    return rebuildExistingEvent(event, deps, sourceText, existing);
+    return rebuildExistingEvent(event, deps, sourceText, preparedTexts, existing);
   }
 
   const telegramText = await fitForTelegramCaption(sourceText, deps.textFit);
@@ -1161,7 +1267,7 @@ async function editMediaEvent(
   await deps.db.updatePost(existing.id, {
     status: "published",
     sourceText,
-    preparedText: sourceText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     telegramText,
@@ -1186,6 +1292,7 @@ async function rebuildExistingEvent(
   event: ParsedBitrixEvent,
   deps: ProcessBitrixEventDeps,
   sourceText: string,
+  preparedTexts: PreparedSocialTexts,
   existing: StoredBitrixPost
 ): Promise<ProcessResult> {
   const messagesToDelete = await listMessagesToDelete(deps.db, existing);
@@ -1204,7 +1311,7 @@ async function rebuildExistingEvent(
     mainMessageId: main?.messageId ?? null,
     publicationKind: published.kind,
     sourceText,
-    preparedText: sourceText,
+    ...preparedTextPatch(preparedTexts),
     postType: event.postType,
     publishTargets: event.publishTargets,
     telegramText: published.telegramText,
@@ -1445,6 +1552,7 @@ async function ignoreEvent(
         scheduledAt: null,
         sourceText,
         preparedText: sourceText,
+        preparedTexts: rawPreparedTexts(sourceText),
         postType: event.postType,
         publishTargets: event.publishTargets,
         photos: event.photos,
@@ -1493,6 +1601,7 @@ async function handleDisabledEvent(
     scheduledAt: null,
     sourceText,
     preparedText: sourceText,
+    preparedTexts: rawPreparedTexts(sourceText),
     postType: event.postType,
     publishTargets: {
       telegram: false,

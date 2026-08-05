@@ -21,6 +21,7 @@ import type {
   PublishTargets
 } from "../bitrix/parseWebhook";
 import type { TelegramMessageRole } from "../telegram/client";
+import type { PreparedSocialTexts } from "../text/socialPlatforms";
 
 export interface OpenSqliteGatewayOptions {
   filename: string;
@@ -38,6 +39,7 @@ interface BitrixPostRow {
   source_text: string;
   telegram_text: string | null;
   prepared_text: string | null;
+  prepared_texts_json: string | null;
   post_type: PostType;
   publish_targets_json: string;
   photos_json: string;
@@ -169,6 +171,7 @@ export class SqliteGateway implements DbGateway {
           source_text,
           telegram_text,
           prepared_text,
+          prepared_texts_json,
           post_type,
           publish_targets_json,
           photos_json,
@@ -177,7 +180,7 @@ export class SqliteGateway implements DbGateway {
           scheduled_retry_count,
           admin_notified_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       input.bitrixId,
       input.status,
@@ -188,6 +191,7 @@ export class SqliteGateway implements DbGateway {
       input.sourceText,
       input.telegramText ?? null,
       input.preparedText ?? null,
+      serializePreparedTexts(input.preparedTexts, input.preparedText ?? null),
       input.postType ?? "unknown",
       JSON.stringify(input.publishTargets ?? defaultPublishTargets()),
       JSON.stringify(input.photos),
@@ -214,6 +218,14 @@ export class SqliteGateway implements DbGateway {
     addPatch(fields, values, "source_text", patch.sourceText);
     addPatch(fields, values, "telegram_text", patch.telegramText);
     addPatch(fields, values, "prepared_text", patch.preparedText);
+    if ("preparedTexts" in patch) {
+      addPatch(
+        fields,
+        values,
+        "prepared_texts_json",
+        serializePreparedTexts(patch.preparedTexts ?? null, patch.preparedText ?? null)
+      );
+    }
     addPatch(fields, values, "post_type", patch.postType);
     if ("publishTargets" in patch && patch.publishTargets) {
       addPatch(fields, values, "publish_targets_json", JSON.stringify(patch.publishTargets));
@@ -498,6 +510,7 @@ function mapPostRow(row: BitrixPostRow): StoredBitrixPost {
     sourceText: row.source_text,
     telegramText: row.telegram_text,
     preparedText: row.prepared_text,
+    preparedTexts: parsePreparedTexts(row.prepared_texts_json, row.prepared_text),
     postType: row.post_type ?? "unknown",
     publishTargets: parsePublishTargets(row.publish_targets_json),
     photos: parsePhotos(row.photos_json),
@@ -574,6 +587,53 @@ function parsePublishTargets(value: string): PublishTargets {
   } catch {
     return defaultPublishTargets();
   }
+}
+
+function serializePreparedTexts(
+  value: PreparedSocialTexts | null | undefined,
+  legacyPreparedText: string | null
+): string | null {
+  if (value && Object.values(value).some((entry) => typeof entry === "string")) {
+    return JSON.stringify(value);
+  }
+
+  if (legacyPreparedText && legacyPreparedText.trim()) {
+    return JSON.stringify({
+      telegram: legacyPreparedText,
+      max: legacyPreparedText
+    });
+  }
+
+  return null;
+}
+
+function parsePreparedTexts(
+  value: string | null,
+  legacyPreparedText: string | null
+): PreparedSocialTexts {
+  if (value) {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object") {
+        return {
+          telegram:
+            typeof parsed.telegram === "string" ? parsed.telegram : undefined,
+          max: typeof parsed.max === "string" ? parsed.max : undefined
+        };
+      }
+    } catch {
+      // Fall through to the legacy prepared_text value below.
+    }
+  }
+
+  if (legacyPreparedText && legacyPreparedText.trim()) {
+    return {
+      telegram: legacyPreparedText,
+      max: legacyPreparedText
+    };
+  }
+
+  return {};
 }
 
 function defaultPublishTargets(): PublishTargets {

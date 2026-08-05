@@ -15,18 +15,24 @@ describe("prepareSocialText", () => {
     "calls AI preparation for %s posts",
     async (_label, postType) => {
       const calls: unknown[] = [];
-      const text = await prepareSocialText(eventWithPostType(postType), "Source text", {
-        aiPrepare: async (request) => {
-          calls.push(request);
-          return `AI ${postType} post`;
+      const text = await prepareSocialText(
+        eventWithPostType(postType),
+        "Source text",
+        "telegram",
+        {
+          aiPrepare: async (request) => {
+            calls.push(request);
+            return `AI ${postType} post`;
+          }
         }
-      });
+      );
 
       expect(text).toBe(`AI ${postType} post`);
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         bitrixId: 1,
         postType,
+        platform: "telegram",
         target: 1200
       });
     }
@@ -39,12 +45,17 @@ describe("prepareSocialText", () => {
     "falls back to light formatting for %s posts when AI is unavailable",
     async (_label, postType) => {
       const calls: unknown[] = [];
-      const text = await prepareSocialText(eventWithPostType(postType), "Line 1\n\nLine 2", {
-        aiPrepare: async (request) => {
-          calls.push(request);
-          throw new Error("AI unavailable");
+      const text = await prepareSocialText(
+        eventWithPostType(postType),
+        "Line 1\n\nLine 2",
+        "telegram",
+        {
+          aiPrepare: async (request) => {
+            calls.push(request);
+            throw new Error("AI unavailable");
+          }
         }
-      });
+      );
 
       expect(calls).toHaveLength(1);
       expect(text).toBe("✨ Line 1\n\nLine 2");
@@ -52,40 +63,56 @@ describe("prepareSocialText", () => {
   );
 
   it("truncates overlong AI output instead of blocking publication", async () => {
-    const text = await prepareSocialText(eventWithPostType("promo"), "Source text", {
-      aiPrepare: async () => "word ".repeat(400)
-    });
+    const text = await prepareSocialText(
+      eventWithPostType("promo"),
+      "Source text",
+      "telegram",
+      {
+        aiPrepare: async () => "word ".repeat(400)
+      }
+    );
 
     expect(text.length).toBeLessThanOrEqual(1200);
     expect(text).toMatch(/^word/);
   });
 
   it("falls back to deterministic formatting when AI throws", async () => {
-    const text = await prepareSocialText(eventWithPostType("company_news"), "News", {
-      aiPrepare: async () => {
-        throw new Error("provider is down");
+    const text = await prepareSocialText(
+      eventWithPostType("company_news"),
+      "News",
+      "telegram",
+      {
+        aiPrepare: async () => {
+          throw new Error("provider is down");
+        }
       }
-    });
+    );
 
     expect(text).toBe("📢 News");
   });
 
   it("reports AI preparation failures before deterministic fallback", async () => {
     const failures: unknown[] = [];
-    const text = await prepareSocialText(eventWithPostType("company_news"), "News", {
-      aiPrepare: async () => {
-        throw new Error("provider is down");
-      },
-      onAiPrepareFailure: async (failure) => {
-        failures.push(failure);
+    const text = await prepareSocialText(
+      eventWithPostType("company_news"),
+      "News",
+      "telegram",
+      {
+        aiPrepare: async () => {
+          throw new Error("provider is down");
+        },
+        onAiPrepareFailure: async (failure) => {
+          failures.push(failure);
+        }
       }
-    });
+    );
 
     expect(text).toBe("📢 News");
     expect(failures).toEqual([
       {
         bitrixId: 1,
         postType: "company_news",
+        platform: "telegram",
         error: "provider is down"
       }
     ]);
@@ -93,18 +120,24 @@ describe("prepareSocialText", () => {
 
   it("reports empty AI preparation before deterministic fallback", async () => {
     const failures: unknown[] = [];
-    const text = await prepareSocialText(eventWithPostType("promo"), "Sale", {
-      aiPrepare: async () => "   ",
-      onAiPrepareFailure: async (failure) => {
-        failures.push(failure);
+    const text = await prepareSocialText(
+      eventWithPostType("promo"),
+      "Sale",
+      "max",
+      {
+        aiPrepare: async () => "   ",
+        onAiPrepareFailure: async (failure) => {
+          failures.push(failure);
+        }
       }
-    });
+    );
 
     expect(text).toBe("🔥 Sale");
     expect(failures).toEqual([
       {
         bitrixId: 1,
         postType: "promo",
+        platform: "max",
         error: "AI social text preparation returned an empty response"
       }
     ]);
