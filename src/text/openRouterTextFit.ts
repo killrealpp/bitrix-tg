@@ -173,10 +173,14 @@ function buildSocialPostMessages(request: SocialTextPrepareRequest): Array<{
     {
       role: "user",
       content: [
-        getPromptForPostType(request.postType, request.platform),
+        getPromptForPostType(request.postType, request.platform, {
+          publicationKind: request.publicationKind,
+          target: request.target
+        }),
         "",
         `Лимит: не более ${request.target} символов.`,
         `Соцсеть публикации: ${request.platform === "telegram" ? "Telegram" : "MAX"}.`,
+        `Формат публикации: ${describeSocialPublicationKind(request)}.`,
         "",
         "Исходные данные:",
         `Заголовок: ${request.title || "нет"}`,
@@ -190,6 +194,18 @@ function buildSocialPostMessages(request: SocialTextPrepareRequest): Array<{
       ].join("\n")
     }
   ];
+}
+
+function describeSocialPublicationKind(request: SocialTextPrepareRequest): string {
+  if (request.platform === "telegram" && request.publicationKind === "caption") {
+    return "Telegram-подпись к фото/альбому";
+  }
+
+  if (request.platform === "telegram") {
+    return "Telegram-текст без фото";
+  }
+
+  return "пост MAX";
 }
 
 function getOpenRouterError(data: OpenRouterChatResponse): string {

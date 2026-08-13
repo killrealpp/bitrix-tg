@@ -132,6 +132,8 @@ describe("OpenRouterTextFitter", () => {
       text: "Обычный текст без категории",
       postType: "unknown",
       platform: "telegram",
+      publicationKind: "text",
+      hasPhotos: false,
       target: 1200,
       title: "Заголовок",
       previewText: "",
@@ -216,6 +218,8 @@ describe("OpenRouterTextFitter", () => {
         text: "Исходный текст",
         postType,
         platform,
+        publicationKind: "text",
+        hasPhotos: false,
         target: 1200,
         title: "Заголовок",
         previewText: "Анонс",
@@ -237,6 +241,11 @@ describe("OpenRouterTextFitter", () => {
       expect(userMessage.content).toContain("Длина поста: не более 1200 символов");
       expect(userMessage.content).toContain("Лимит: не более 1200 символов");
       expect(userMessage.content).toContain(`Соцсеть публикации: ${platformLabel}`);
+      expect(userMessage.content).toContain(
+        platform === "telegram"
+          ? "Формат публикации: Telegram-текст без фото"
+          : "Формат публикации: пост MAX"
+      );
       expect(userMessage.content).not.toContain(
         "Один итоговый текст используется сразу для Telegram и MAX"
       );
@@ -246,4 +255,57 @@ describe("OpenRouterTextFitter", () => {
       expect(userMessage.content).toContain("Ссылка на источник: https://example.com/news");
     }
   );
+
+  it("adds a caption-specific Telegram prompt when the post has photos", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Короткий Telegram caption"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+    const fitter = new OpenRouterTextFitter({
+      apiKey: "openrouter-secret",
+      model: "openai/gpt-4.1-mini",
+      fetchImpl: fetchMock
+    });
+
+    await fitter.prepareSocialPost({
+      text: "Исходный текст",
+      postType: "company_news",
+      platform: "telegram",
+      publicationKind: "caption",
+      hasPhotos: true,
+      target: 950,
+      title: "Заголовок",
+      previewText: "Анонс",
+      detailText: "Подробный текст",
+      scheduledAtRawValue: "10.07.2026 12:00:00",
+      url: "https://example.com/news"
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    const userMessage = body.messages.find(
+      (message: { role: string }) => message.role === "user"
+    );
+    expect(userMessage.content).toContain("Длина поста: не более 950 символов");
+    expect(userMessage.content).toContain("Telegram-подписи к фото/альбому");
+    expect(userMessage.content).toContain("CTA и блок «Следите за нами» обязательны");
+    expect(userMessage.content).toContain("не сокращай ссылки");
+    expect(userMessage.content).toContain("Формат публикации: Telegram-подпись к фото/альбому");
+    expect(userMessage.content).toContain("Лимит: не более 950 символов");
+    expect(userMessage.content).not.toContain("Длина поста: не более 1200 символов");
+  });
 });

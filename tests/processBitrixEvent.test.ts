@@ -4,6 +4,7 @@ import {
   processBitrixEvent,
   type MissingScheduleTimeAdminNotifier
 } from "../src/poster/processBitrixEvent";
+import { TELEGRAM_SOCIAL_CAPTION_TARGET } from "../src/text/socialText";
 import {
   FakeBitrixPhotoResolver,
   FakeDbGateway,
@@ -333,6 +334,54 @@ describe("processBitrixEvent", () => {
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
     expect(db.posts[0].publicationKind).toBe("photo");
     expect(db.messages[0].role).toBe("photo");
+  });
+
+  it("keeps Telegram follow links intact when a photo caption is shortened", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const footer = [
+      "👉 Для заказа и бесплатной консультации: https://t.me/MagazinSvarnoy",
+      "",
+      "📌 Следите за нами:",
+      "— MAX: https://max.ru/id4025424601_biz",
+      "— Telegram: https://t.me/svarnoymagazin",
+      "— ВК: https://vk.com/svarnoy40"
+    ].join("\n");
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 55,
+        active: "Y",
+        publish_social: "Y",
+        publish_targets: {
+          telegram: "Y"
+        },
+        post_type: "Новость компании",
+        name: "Photo post",
+        all_properties: {
+          PHOTOS: {
+            url: "https://example.com/photo.jpg"
+          }
+        }
+      }
+    });
+
+    const result = await processBitrixEvent(event, {
+      db,
+      telegram,
+      textFit: {
+        aiPrepare: async () =>
+          `${"Подробный технический текст о товаре и его применении. ".repeat(50)}\n\n${footer}`
+      }
+    });
+
+    expect(result.status).toBe("published");
+    expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
+    const caption = (telegram.calls[0].input as { caption: string }).caption;
+    expect(caption.length).toBeLessThanOrEqual(TELEGRAM_SOCIAL_CAPTION_TARGET);
+    expect(caption).toContain("https://t.me/MagazinSvarnoy");
+    expect(caption).toContain("— MAX: https://max.ru/id4025424601_biz");
+    expect(caption).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(caption).toContain("— ВК: https://vk.com/svarnoy40");
   });
 
   it("publishes a new multi-photo post through sendMediaGroup", async () => {
@@ -1541,11 +1590,17 @@ describe("processBitrixEvent", () => {
     expect(aiCalls).toEqual([
       expect.objectContaining({
         postType: "company_news",
-        platform: "telegram"
+        platform: "telegram",
+        publicationKind: "caption",
+        hasPhotos: true,
+        target: TELEGRAM_SOCIAL_CAPTION_TARGET
       }),
       expect.objectContaining({
         postType: "company_news",
-        platform: "max"
+        platform: "max",
+        publicationKind: "text",
+        hasPhotos: true,
+        target: 1200
       })
     ]);
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendMediaGroup"]);
@@ -1622,11 +1677,15 @@ describe("processBitrixEvent", () => {
       expect.objectContaining({
         postType: "unknown",
         platform: "telegram",
-        target: 1200
+        publicationKind: "caption",
+        hasPhotos: true,
+        target: TELEGRAM_SOCIAL_CAPTION_TARGET
       }),
       expect.objectContaining({
         postType: "unknown",
         platform: "max",
+        publicationKind: "text",
+        hasPhotos: true,
         target: 1200
       })
     ]);

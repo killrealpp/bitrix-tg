@@ -561,6 +561,8 @@ function withTextFitDiagnostics(
                 bitrixId: request.bitrixId,
                 postType: request.postType,
                 platform: request.platform,
+                publicationKind: request.publicationKind,
+                hasPhotos: request.hasPhotos,
                 inputLength: request.text.length,
                 outputLength,
                 target: request.target,

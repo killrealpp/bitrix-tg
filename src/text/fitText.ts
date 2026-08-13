@@ -18,6 +18,8 @@ export interface SocialTextPrepareRequest {
   text: string;
   postType: PostType;
   platform: SocialTextPlatform;
+  publicationKind: "text" | "caption";
+  hasPhotos: boolean;
   target: number;
   title: string;
   previewText: string;
@@ -90,7 +92,32 @@ async function fitText(
     }
   }
 
-  return truncateAtWord(normalized, target);
+  return kind === "caption"
+    ? truncateTelegramCaptionAtWord(normalized, target)
+    : truncateAtWord(normalized, target);
+}
+
+export function truncateTelegramCaptionAtWord(text: string, target: number): string {
+  if (text.length <= target) {
+    return text;
+  }
+
+  const tailStart = findSocialTailStart(text);
+  if (tailStart <= 0) {
+    return truncateAtWord(text, target);
+  }
+
+  const prefix = text.slice(0, tailStart).trim();
+  const tail = text.slice(tailStart).trim();
+  const separator = "\n\n";
+  const prefixTarget = target - tail.length - separator.length;
+
+  if (prefixTarget <= 20) {
+    return truncateAtWord(text, target);
+  }
+
+  const truncatedPrefix = truncateAtWord(prefix, prefixTarget);
+  return `${truncatedPrefix}${separator}${tail}`;
 }
 
 export function truncateAtWord(text: string, target: number): string {
@@ -119,4 +146,15 @@ export function truncateAtWord(text: string, target: number): string {
   }
 
   return `${slice.trim()}...`;
+}
+
+function findSocialTailStart(text: string): number {
+  const followIndex = text.lastIndexOf("📌 Следите за нами:");
+  const orderIndex = text.lastIndexOf("👉 Для заказа");
+
+  if (orderIndex >= 0 && (followIndex < 0 || orderIndex < followIndex)) {
+    return orderIndex;
+  }
+
+  return followIndex;
 }

@@ -5,6 +5,7 @@ import {
   runDuePosts,
   type ScheduledFailureAdminNotifier
 } from "../src/scheduler/runDuePosts";
+import { TELEGRAM_SOCIAL_CAPTION_TARGET } from "../src/text/socialText";
 import {
   FakeBitrixPhotoResolver,
   FakeDbGateway,
@@ -66,6 +67,7 @@ describe("scheduled publishing", () => {
     const telegram = new FakeTelegramClient();
     const vk = new FakeExternalPublisher("vk");
     const max = new FakeExternalPublisher("max");
+    const aiCalls: unknown[] = [];
     const [event] = parseBitrixWebhook({
       body: {
         element_id: 31,
@@ -94,10 +96,12 @@ describe("scheduled publishing", () => {
       telegram,
       externalPublishers: { vk, max },
       textFit: {
-        aiPrepare: async (request) =>
-          request.platform === "telegram"
+        aiPrepare: async (request) => {
+          aiCalls.push(request);
+          return request.platform === "telegram"
             ? "Prepared Telegram scheduled post"
-            : "Prepared MAX scheduled post"
+            : "Prepared MAX scheduled post";
+        }
       },
       now: new Date("2026-06-04T12:00:00.000Z")
     });
@@ -109,6 +113,20 @@ describe("scheduled publishing", () => {
     });
 
     expect(scheduled.status).toBe("scheduled");
+    expect(aiCalls).toEqual([
+      expect.objectContaining({
+        platform: "telegram",
+        publicationKind: "caption",
+        hasPhotos: true,
+        target: TELEGRAM_SOCIAL_CAPTION_TARGET
+      }),
+      expect.objectContaining({
+        platform: "max",
+        publicationKind: "text",
+        hasPhotos: true,
+        target: 1200
+      })
+    ]);
     expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
     expect(telegram.calls.map((call) => call.method)).toEqual(["sendPhoto"]);
     expect(telegram.calls[0].input).toMatchObject({

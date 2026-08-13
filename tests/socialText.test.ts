@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { PostType } from "../src/bitrix/parseWebhook";
 import { parseBitrixWebhook } from "../src/bitrix/parseWebhook";
-import { prepareSocialText } from "../src/text/socialText";
+import {
+  TELEGRAM_SOCIAL_CAPTION_TARGET,
+  prepareSocialText
+} from "../src/text/socialText";
 
 describe("prepareSocialText", () => {
   it.each([
@@ -33,6 +36,8 @@ describe("prepareSocialText", () => {
         bitrixId: 1,
         postType,
         platform: "telegram",
+        publicationKind: "text",
+        hasPhotos: false,
         target: 1200
       });
     }
@@ -74,6 +79,82 @@ describe("prepareSocialText", () => {
 
     expect(text.length).toBeLessThanOrEqual(1200);
     expect(text).toMatch(/^word/);
+  });
+
+  it("uses the Telegram caption target only when the post has photos", async () => {
+    const calls: unknown[] = [];
+    const text = await prepareSocialText(
+      eventWithPostType("company_news", true),
+      "Source text",
+      "telegram",
+      {
+        aiPrepare: async (request) => {
+          calls.push(request);
+          return "Caption-ready text";
+        }
+      }
+    );
+
+    expect(text).toBe("Caption-ready text");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        platform: "telegram",
+        publicationKind: "caption",
+        hasPhotos: true,
+        target: TELEGRAM_SOCIAL_CAPTION_TARGET
+      })
+    ]);
+  });
+
+  it("keeps the normal SMM target for MAX even when the post has photos", async () => {
+    const calls: unknown[] = [];
+    const text = await prepareSocialText(
+      eventWithPostType("company_news", true),
+      "Source text",
+      "max",
+      {
+        aiPrepare: async (request) => {
+          calls.push(request);
+          return "MAX text";
+        }
+      }
+    );
+
+    expect(text).toBe("MAX text");
+    expect(calls).toEqual([
+      expect.objectContaining({
+        platform: "max",
+        publicationKind: "text",
+        hasPhotos: true,
+        target: 1200
+      })
+    ]);
+  });
+
+  it("preserves the required footer when overlong Telegram photo AI output is truncated", async () => {
+    const footer = [
+      "👉 Для заказа и бесплатной консультации: https://t.me/MagazinSvarnoy",
+      "",
+      "📌 Следите за нами:",
+      "— MAX: https://max.ru/id4025424601_biz",
+      "— Telegram: https://t.me/svarnoymagazin",
+      "— ВК: https://vk.com/svarnoy40"
+    ].join("\n");
+    const text = await prepareSocialText(
+      eventWithPostType("company_news", true),
+      "News",
+      "telegram",
+      {
+        aiPrepare: async () =>
+          `${"Подробный технический текст о товаре и его применении. ".repeat(50)}\n\n${footer}`
+      }
+    );
+
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_SOCIAL_CAPTION_TARGET);
+    expect(text).toContain("https://t.me/MagazinSvarnoy");
+    expect(text).toContain("— MAX: https://max.ru/id4025424601_biz");
+    expect(text).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(text).toContain("— ВК: https://vk.com/svarnoy40");
   });
 
   it("falls back to deterministic formatting when AI throws", async () => {
@@ -144,7 +225,7 @@ describe("prepareSocialText", () => {
   });
 });
 
-function eventWithPostType(postType: PostType) {
+function eventWithPostType(postType: PostType, withPhotos = false) {
   const [event] = parseBitrixWebhook({
     body: {
       element_id: 1,
@@ -154,7 +235,14 @@ function eventWithPostType(postType: PostType) {
         telegram: "Y"
       },
       post_type: postType,
-      name: "Title"
+      name: "Title",
+      all_properties: withPhotos
+        ? {
+            PHOTOS: {
+              url: "https://example.com/photo.jpg"
+            }
+          }
+        : undefined
     }
   });
 

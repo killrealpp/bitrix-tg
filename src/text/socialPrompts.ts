@@ -250,7 +250,32 @@ const FORMAT_ONLY_PROMPT = `
 
 export function getPromptForPostType(
   postType: PostType,
-  platform: SocialTextPlatform
+  platform: SocialTextPlatform,
+  options: { publicationKind?: "text" | "caption"; target?: number } = {}
 ): string {
-  return PROMPTS[platform][postType as BusinessPostType] ?? FORMAT_ONLY_PROMPT;
+  const prompt = PROMPTS[platform][postType as BusinessPostType] ?? FORMAT_ONLY_PROMPT;
+
+  if (platform === "telegram" && options.publicationKind === "caption") {
+    return withTelegramCaptionRules(prompt, options.target ?? 950);
+  }
+
+  return prompt;
+}
+
+function withTelegramCaptionRules(prompt: string, target: number): string {
+  const captionLengthRule =
+    `— Длина поста: не более ${target} символов. Это общий лимит Telegram-подписи к фото/альбому, включая заголовок, основной текст, CTA, блок «Следите за нами» и хэштеги.`;
+  const normalizedPrompt = prompt.replace(
+    /— Длина поста: не более 1200 символов\./g,
+    captionLengthRule
+  );
+
+  return [
+    normalizedPrompt,
+    "",
+    "Дополнительные правила для Telegram-поста с фото:",
+    `— Итоговый текст публикуется как подпись к фото/альбому, поэтому строго уложи весь пост в ${target} символов.`,
+    "— CTA и блок «Следите за нами» обязательны и должны остаться целыми: не сокращай ссылки, не заменяй строки многоточием.",
+    "— Если места не хватает, сокращай только основной блок, детали, преимущества и контекст."
+  ].join("\n");
 }
