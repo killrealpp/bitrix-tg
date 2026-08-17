@@ -349,3 +349,27 @@ address. Resolving the macros stays a Bitrix-side fix.
 Verification: `npm test` passed 191 tests in 15 files, `npm run build` passed,
 and a synthetic webhook carrying the macro template produced post text with no
 link block, no macros, and no admin URL.
+
+## [2026-08-17 17:05+03:00] milestone | Channel cleanup and an honest VK error
+
+Live channel messages no longer carry the control-panel or macro links. Telegram
+message 39 was rewritten through `editMessageCaption`; messages 36, 37 and 38
+returned `message to edit not found`, so they had already been removed from the
+channel by hand and are now recorded as `deleted`. In MAX only the message for
+post `181893` still exists and it was rewritten through
+`PUT /messages?message_id=...`, reusing the attachment `token` from the message
+itself: re-sending the image by URL fails with `Failed to upload image`. The
+other four MAX messages are gone from the chat and are recorded as `deleted`.
+
+`/admin/vk/oauth/*` used to answer `vk_oauth_not_configured` with "Set
+VK_CLIENT_ID and VK_REDIRECT_URI", which is misleading — both are set in `.env`.
+VK is off because `startServer` pins `vkOAuth` to `undefined` and
+`buildExternalPublishers` registers MAX only. The route now answers
+`vk_publishing_disabled` and says so, and the pinned constant carries a comment
+explaining how to bring VK back.
+
+Verification: `npm test` passed 191 tests in 15 files, `npm run build` passed,
+all four routes answer as expected (`/health` 200, both VK routes 503,
+`/webhooks/bitrix` 400 on an empty body, unknown paths 404), `pragma
+integrity_check` and `pragma foreign_key_check` are clean, and no published
+social publication matches the admin or macro patterns any more.

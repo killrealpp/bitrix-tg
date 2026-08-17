@@ -106,8 +106,9 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
     if (!deps.vkOAuth) {
       return reply.code(503).send({
         ok: false,
-        error: "vk_oauth_not_configured",
-        message: "Set VK_CLIENT_ID and VK_REDIRECT_URI before starting VK OAuth."
+        error: "vk_publishing_disabled",
+        message:
+          "VK publishing is switched off in this build: startServer pins vkOAuth to undefined and buildExternalPublishers registers MAX only. The VK_* variables are ignored until that changes, so setting them has no effect."
       });
     }
 
@@ -125,8 +126,9 @@ export function buildApp(deps: BuildAppDeps): FastifyInstance {
     if (!deps.vkOAuth) {
       return reply.code(503).send({
         ok: false,
-        error: "vk_oauth_not_configured",
-        message: "Set VK_CLIENT_ID and VK_REDIRECT_URI before handling VK OAuth."
+        error: "vk_publishing_disabled",
+        message:
+          "VK publishing is switched off in this build: startServer pins vkOAuth to undefined and buildExternalPublishers registers MAX only. The VK_* variables are ignored until that changes, so setting them has no effect."
       });
     }
 
@@ -455,6 +457,9 @@ export async function startServer(): Promise<void> {
   const adminNotifier = adminTelegram
     ? new TelegramScheduledFailureAdminNotifier(adminTelegram)
     : undefined;
+  // VK publishing stays off: the group token kept failing photos.getWallUploadServer
+  // with scope and IP-binding errors. Call buildVkOAuth(config, db) here and register
+  // a VK publisher in buildExternalPublishers to bring it back.
   const vkOAuth: VkOAuthTokenService | undefined = undefined;
   const externalPublishers = buildExternalPublishers(config, vkOAuth);
   const photoResolver = config.bitrixFileResolverUrl
