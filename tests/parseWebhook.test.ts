@@ -586,4 +586,62 @@ describe("parseBitrixWebhook", () => {
       BitrixWebhookParseError
     );
   });
+
+  it("prefers public_url over the Bitrix admin edit link", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 181892,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        url: "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=181892",
+        public_url: "https://svarnoy-market.ru/news/181892/"
+      }
+    });
+
+    expect(event.url).toBe("https://svarnoy-market.ru/news/181892/");
+  });
+
+  it("falls back to detail_page_url when public_url is absent", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 42,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        url: "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=42",
+        detail_page_url: "https://svarnoy-market.ru/news/42/"
+      }
+    });
+
+    expect(event.url).toBe("https://svarnoy-market.ru/news/42/");
+  });
+
+  it("drops an admin-only url instead of leaking it into post text", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 43,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        url: "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=43"
+      }
+    });
+
+    expect(event.url).toBe("");
+  });
+
+  it("keeps a plain public url when no aliases are present", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 44,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        url: "https://svarnoy-market.ru/news/44/"
+      }
+    });
+
+    expect(event.url).toBe("https://svarnoy-market.ru/news/44/");
+  });
 });

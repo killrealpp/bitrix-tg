@@ -1,5 +1,24 @@
 import { createHash } from "node:crypto";
 
+// Bitrix sends both the admin edit link (`url`) and the public detail page
+// (`public_url`). Only the public one may reach a published post, so the public
+// aliases are tried first and anything pointing into the control panel is
+// rejected outright.
+const PRIVATE_URL_PATTERN = /\/bitrix\/(?:admin|tools)\//i;
+
+const PUBLIC_URL_PATHS = [
+  "public_url",
+  "PUBLIC_URL",
+  "publicUrl",
+  "fields.PUBLIC_URL",
+  "detail_page_url",
+  "DETAIL_PAGE_URL",
+  "fields.DETAIL_PAGE_URL",
+  "FIELDS.DETAIL_PAGE_URL",
+  "url",
+  "URL"
+];
+
 export interface NormalizedPhoto {
   id?: string;
   url?: string;
@@ -205,16 +224,7 @@ function parseEnvelope(
         "FIELDS.DETAIL_TEXT"
       ])
     ),
-    url: toStringValue(
-      readFirstValue(body, [
-        "url",
-        "URL",
-        "detail_page_url",
-        "DETAIL_PAGE_URL",
-        "fields.DETAIL_PAGE_URL",
-        "FIELDS.DETAIL_PAGE_URL"
-      ])
-    ),
+    url: pickPublicUrl(body),
     photos,
     scheduledAt: scheduledAt.date,
     scheduledAtSourceField: scheduledAt.sourceField,
@@ -924,6 +934,19 @@ function readFirstPhotos(
   }
 
   return [];
+}
+
+function pickPublicUrl(body: Record<string, unknown>): string {
+  for (const path of PUBLIC_URL_PATHS) {
+    const value = toStringValue(readFirstValue(body, [path])).trim();
+    if (!value || PRIVATE_URL_PATTERN.test(value)) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return "";
 }
 
 function readFirstValue(

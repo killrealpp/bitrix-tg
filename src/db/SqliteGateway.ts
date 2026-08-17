@@ -159,6 +159,26 @@ export class SqliteGateway implements DbGateway {
   }
 
   async createPost(input: PersistPostInput): Promise<StoredBitrixPost> {
+    try {
+      return await this.insertPost(input);
+    } catch (error) {
+      // Two overlapping webhooks for the same element both see no existing row
+      // and race to insert. The loser reuses the winner's row instead of
+      // failing the request: the payloads are duplicates of each other.
+      if (!isUniqueBitrixIdViolation(error)) {
+        throw error;
+      }
+
+      const existing = await this.findPostByBitrixId(input.bitrixId);
+      if (!existing) {
+        throw error;
+      }
+
+      return existing;
+    }
+  }
+
+  private async insertPost(input: PersistPostInput): Promise<StoredBitrixPost> {
     const result = await this.db.run(
       `
         INSERT INTO bitrix_posts (
@@ -482,6 +502,16 @@ export class SqliteGateway implements DbGateway {
       );
     }
   }
+}
+
+function isUniqueBitrixIdViolation(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+
+  return (
+    message.includes("SQLITE_CONSTRAINT") &&
+    message.includes("bitrix_posts.bitrix_id")
+  );
 }
 
 function addPatch(

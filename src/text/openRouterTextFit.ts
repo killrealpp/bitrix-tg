@@ -188,6 +188,13 @@ function buildSocialPostMessages(request: SocialTextPrepareRequest): Array<{
         `Подробный текст: ${request.detailText || "нет"}`,
         `Дата и время: ${request.scheduledAtRawValue || "нет"}`,
         `Ссылка на источник: ${request.url || "нет"}`,
+        ...(request.url
+          ? [
+              "Вставь ссылку на источник ровно как она указана выше, без изменений."
+            ]
+          : [
+              "Ссылки на источник нет. Полностью пропусти пункт «Подробнее» и не подставляй вместо него никакой адрес."
+            ]),
         "",
         "Текст для адаптации:",
         request.text

@@ -302,3 +302,36 @@ content type, and filename, without exposing any URL or token.
 Verification: `npx vitest run tests/vkClient.test.ts --reporter=verbose` passed
 10 tests, `npm test -- --reporter=dot` passed 162 tests in 14 files, and
 `npm run build` passed.
+
+## [2026-08-17 16:15+03:00] milestone | Public URL only, and duplicate-safe post creation
+
+Published posts contained `Подробнее:
+/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=181892`. The Bitrix
+`init.php` payload carries both the admin edit link as `url` and the public
+detail page as `public_url`, and the parser read `url` first while `public_url`
+was not in the alias list at all. Four posts and eight social publications had
+already shipped the admin link to Telegram and MAX.
+
+The parser now resolves the source link through `pickPublicUrl`, which tries
+`public_url`, then `detail_page_url`, then `url`, and rejects any candidate
+matching `/bitrix/(admin|tools)/`. When no public link survives, the AI prompt
+explicitly instructs the model to drop the «Подробнее» item instead of inventing
+an address.
+
+`SqliteGateway.createPost` no longer fails the request when two overlapping
+webhooks for one element race to insert: the loser detects the
+`bitrix_posts.bitrix_id` unique violation and reuses the winner's row. This was
+observed on 2026-08-06 as an unhandled `SQLITE_CONSTRAINT` returning HTTP 500,
+and reproduced again on 2026-08-17 when one element arrived three times in under
+a minute.
+
+Also on the Bitrix side: the handler read the element through
+`CIBlockElement::GetList` without `CHECK_PERMISSIONS => "N"`, and `init.php`
+existed only under the `svarka40.com` document root, so editors working in the
+`b24.svarnoy.org` admin never registered the event handler and their posts never
+produced a webhook. A loader in `/home/bitrix/www/local/php_interface/init.php`
+now requires the shared file.
+
+Verification: `npm test` passed 189 tests in 15 files, `npm run build` passed,
+and a synthetic webhook carrying an admin `url` plus a public `public_url`
+produced post text containing only `https://svarnoy-market.ru/news/999000777/`.

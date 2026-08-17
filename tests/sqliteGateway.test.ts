@@ -74,4 +74,28 @@ describe("SqliteGateway", () => {
     );
     expect(messages.map((message) => message.tgMessageId)).toEqual([501, 502]);
   });
+
+  it("reuses the existing row when two webhooks race to create the same post", async () => {
+    db = await openSqliteGateway({
+      filename: ":memory:",
+      migrationsDir: path.resolve(process.cwd(), "migrations")
+    });
+
+    const input = {
+      bitrixId: 181892,
+      status: "scheduled" as const,
+      sourceText: "Термофены",
+      photos: [],
+      payloadHash: "hash-a"
+    };
+
+    const first = await db.createPost(input);
+    const second = await db.createPost({ ...input, payloadHash: "hash-b" });
+
+    expect(second.id).toBe(first.id);
+    expect(second.payloadHash).toBe("hash-a");
+
+    const all = await db.findPostByBitrixId(181892);
+    expect(all?.id).toBe(first.id);
+  });
 });

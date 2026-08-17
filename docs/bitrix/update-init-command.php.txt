@@ -85,7 +85,7 @@ function bitrixTgBuildPayload(int $elementId, string $action): ?array
         "DETAIL_PAGE_URL",
     ];
 
-    $result = \CIBlockElement::GetList([], ["ID" => $elementId], false, false, $select);
+    $result = \CIBlockElement::GetList([], ["ID" => $elementId, "CHECK_PERMISSIONS" => "N"], false, false, $select);
     $fields = $result->Fetch();
     if (!$fields) {
         return null;
@@ -476,7 +476,7 @@ function bitrixTgPostJson(string $url, array $payload, string $secret = ""): voi
     try {
         $http = new \Bitrix\Main\Web\HttpClient([
             "socketTimeout" => 5,
-            "streamTimeout" => 10,
+            "streamTimeout" => 60,
             "disableSslVerification" => false,
         ]);
         $http->setHeader("Content-Type", "application/json", true);
