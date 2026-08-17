@@ -631,6 +631,39 @@ describe("parseBitrixWebhook", () => {
     expect(event.url).toBe("");
   });
 
+  it("drops a public_url that still carries unresolved Bitrix macros", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 181893,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        url: "/bitrix/admin/iblock_element_edit.php?IBLOCK_ID=151&ID=181893",
+        public_url:
+          "https://svarnoy-market.ru/#SITE_DIR#company/news/#SECTION_CODE#/#ELEMENT_CODE#/"
+      }
+    });
+
+    expect(event.url).toBe("");
+  });
+
+  it("uses detail_page_url when public_url is an unresolved template", () => {
+    const [event] = parseBitrixWebhook({
+      body: {
+        element_id: 45,
+        ACTIVE: "Y",
+        PUB_NEWS_SOCIAL: "2976",
+        NAME: "Title",
+        public_url: "https://svarnoy-market.ru/#SITE_DIR#news/#ELEMENT_CODE#/",
+        detail_page_url: "https://svarnoy-market.ru/company/news/promo/termofen/"
+      }
+    });
+
+    expect(event.url).toBe(
+      "https://svarnoy-market.ru/company/news/promo/termofen/"
+    );
+  });
+
   it("keeps a plain public url when no aliases are present", () => {
     const [event] = parseBitrixWebhook({
       body: {

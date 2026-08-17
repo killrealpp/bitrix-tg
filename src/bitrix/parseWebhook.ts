@@ -6,6 +6,11 @@ import { createHash } from "node:crypto";
 // rejected outright.
 const PRIVATE_URL_PATTERN = /\/bitrix\/(?:admin|tools)\//i;
 
+// Bitrix returns DETAIL_PAGE_URL as a raw template when the macros are not
+// resolved, e.g. `/#SITE_DIR#company/news/#SECTION_CODE#/#ELEMENT_CODE#/`.
+// Such a link is broken for readers, so it is treated as no link at all.
+const UNRESOLVED_MACRO_PATTERN = /#[A-Z_]+#/;
+
 const PUBLIC_URL_PATHS = [
   "public_url",
   "PUBLIC_URL",
@@ -939,7 +944,11 @@ function readFirstPhotos(
 function pickPublicUrl(body: Record<string, unknown>): string {
   for (const path of PUBLIC_URL_PATHS) {
     const value = toStringValue(readFirstValue(body, [path])).trim();
-    if (!value || PRIVATE_URL_PATTERN.test(value)) {
+    if (
+      !value ||
+      PRIVATE_URL_PATTERN.test(value) ||
+      UNRESOLVED_MACRO_PATTERN.test(value)
+    ) {
       continue;
     }
 

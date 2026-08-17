@@ -335,3 +335,17 @@ now requires the shared file.
 Verification: `npm test` passed 189 tests in 15 files, `npm run build` passed,
 and a synthetic webhook carrying an admin `url` plus a public `public_url`
 produced post text containing only `https://svarnoy-market.ru/news/999000777/`.
+
+## [2026-08-17 16:45+03:00] milestone | Unresolved DETAIL_PAGE_URL macros dropped
+
+With the admin link gone, post `181893` shipped
+`Подробнее: https://svarnoy-market.ru/#SITE_DIR#company/news/#SECTION_CODE#/#ELEMENT_CODE#/`.
+Bitrix returns `DETAIL_PAGE_URL` as a raw template when the macros are not
+resolved, and `init.php` passes it through as `public_url`. The parser now
+rejects any candidate matching `#[A-Z_]+#` the same way it rejects control-panel
+links, so the AI drops the «Подробнее» item instead of publishing a dead
+address. Resolving the macros stays a Bitrix-side fix.
+
+Verification: `npm test` passed 191 tests in 15 files, `npm run build` passed,
+and a synthetic webhook carrying the macro template produced post text with no
+link block, no macros, and no admin URL.
