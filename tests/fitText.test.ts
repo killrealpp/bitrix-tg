@@ -69,7 +69,6 @@ describe("text fitting", () => {
       "",
       "📌 Следите за нами:",
       "— MAX: https://max.ru/id4025424601_biz",
-      "— Telegram: https://t.me/svarnoymagazin",
       "— ВК: https://vk.com/svarnoy40"
     ].join("\n");
     const longText = `${"Подробное описание аппарата и условий применения. ".repeat(60)}\n\n${footer}`;
@@ -79,7 +78,7 @@ describe("text fitting", () => {
     expect(fitted.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_TARGET);
     expect(fitted).toContain("https://t.me/MagazinSvarnoy");
     expect(fitted).toContain("— MAX: https://max.ru/id4025424601_biz");
-    expect(fitted).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(fitted).not.toContain("https://t.me/svarnoymagazin");
     expect(fitted).toContain("— ВК: https://vk.com/svarnoy40");
   });
 });

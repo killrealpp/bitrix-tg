@@ -137,7 +137,6 @@ describe("prepareSocialText", () => {
       "",
       "📌 Следите за нами:",
       "— MAX: https://max.ru/id4025424601_biz",
-      "— Telegram: https://t.me/svarnoymagazin",
       "— ВК: https://vk.com/svarnoy40"
     ].join("\n");
     const text = await prepareSocialText(
@@ -153,8 +152,31 @@ describe("prepareSocialText", () => {
     expect(text.length).toBeLessThanOrEqual(TELEGRAM_SOCIAL_CAPTION_TARGET);
     expect(text).toContain("https://t.me/MagazinSvarnoy");
     expect(text).toContain("— MAX: https://max.ru/id4025424601_biz");
-    expect(text).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(text).not.toContain("https://t.me/svarnoymagazin");
     expect(text).toContain("— ВК: https://vk.com/svarnoy40");
+  });
+
+  it("removes the MAX channel link from AI text prepared for MAX", async () => {
+    const text = await prepareSocialText(
+      eventWithPostType("company_news"),
+      "News",
+      "max",
+      {
+        aiPrepare: async () =>
+          [
+            "Новость",
+            "",
+            "📌 Следите за нами:",
+            "— MAX: https://max.ru/id4025424601_biz",
+            "— Telegram: https://t.me/svarnoymagazin",
+            "— ВК: https://vk.com/svarnoy40"
+          ].join("\n")
+      }
+    );
+
+    expect(text).not.toContain("https://max.ru/id4025424601_biz");
+    expect(text).toContain("https://t.me/svarnoymagazin");
+    expect(text).toContain("https://vk.com/svarnoy40");
   });
 
   it("falls back to deterministic formatting when AI throws", async () => {

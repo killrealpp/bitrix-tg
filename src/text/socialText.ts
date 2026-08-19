@@ -5,6 +5,7 @@ import {
   truncateAtWord,
   type TextFitOptions
 } from "./fitText";
+import { sanitizeSocialPostText } from "./socialFooter";
 import type { SocialTextPlatform } from "./socialPlatforms";
 
 export const SOCIAL_AI_TARGET = 1200;
@@ -29,7 +30,7 @@ export async function prepareSocialText(
   }
 
   try {
-    const prepared = (
+    const prepared = sanitizeSocialPostText(
       await options.aiPrepare({
         bitrixId: event.bitrixId,
         text: formatted,
@@ -43,7 +44,8 @@ export async function prepareSocialText(
         detailText: event.detailText,
         scheduledAtRawValue: event.scheduledAtRawValue,
         url: event.url
-      })
+      }),
+      platform
     ).trim();
 
     if (prepared.length > 0 && prepared.length <= target) {
@@ -65,7 +67,10 @@ export async function prepareSocialText(
     // Deterministic formatting keeps publication available if AI is unavailable.
   }
 
-  return truncatePreparedSocialText(formatted, target, platform, publicationKind);
+  return sanitizeSocialPostText(
+    truncatePreparedSocialText(formatted, target, platform, publicationKind),
+    platform
+  );
 }
 
 function truncatePreparedSocialText(

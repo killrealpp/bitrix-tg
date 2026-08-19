@@ -24,6 +24,7 @@ import {
   type TextFitOptions
 } from "../text/fitText";
 import { prepareSocialText } from "../text/socialText";
+import { sanitizeSocialPostText } from "../text/socialFooter";
 import type {
   PreparedSocialTexts,
   SocialTextPlatform
@@ -336,7 +337,7 @@ function platformText(
   platform: SocialTextPlatform,
   fallback: string
 ): string {
-  return preparedTexts[platform] ?? fallback;
+  return sanitizeSocialPostText(preparedTexts[platform] ?? fallback, platform);
 }
 
 function legacyPreparedText(preparedTexts: PreparedSocialTexts): string | null {

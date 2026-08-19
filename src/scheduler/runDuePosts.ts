@@ -17,6 +17,7 @@ import {
   fitForVkPost,
   type TextFitOptions
 } from "../text/fitText";
+import { sanitizeSocialPostText } from "../text/socialFooter";
 import type { SocialTextPlatform } from "../text/socialPlatforms";
 import { redactSensitiveText } from "../security/redaction";
 import type {
@@ -187,7 +188,8 @@ function storedPlatformText(
   post: StoredBitrixPost,
   platform: SocialTextPlatform
 ): string | null {
-  return post.preparedTexts[platform] ?? post.preparedText ?? null;
+  const text = post.preparedTexts[platform] ?? post.preparedText ?? null;
+  return text ? sanitizeSocialPostText(text, platform) : null;
 }
 
 async function resolveStoredPostPhotos(

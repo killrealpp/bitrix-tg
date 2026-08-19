@@ -235,9 +235,22 @@ describe("OpenRouterTextFitter", () => {
       expect(userMessage.content).toContain(marker);
       expect(userMessage.content).toContain(cta);
       expect(userMessage.content).toContain("📌 Следите за нами:");
-      expect(userMessage.content).toContain("— MAX: https://max.ru/id4025424601_biz");
-      expect(userMessage.content).toContain("— Telegram: https://t.me/svarnoymagazin");
+      expect(userMessage.content).toContain(
+        platform === "telegram"
+          ? "— MAX: https://max.ru/id4025424601_biz"
+          : "— Telegram: https://t.me/svarnoymagazin"
+      );
+      expect(userMessage.content).not.toContain(
+        platform === "telegram"
+          ? "— Telegram: https://t.me/svarnoymagazin"
+          : "— MAX: https://max.ru/id4025424601_biz"
+      );
       expect(userMessage.content).toContain("— ВК: https://vk.com/svarnoy40");
+      expect(userMessage.content).toContain("Используй настоящие переносы строк");
+      expect(userMessage.content).toContain("обезличенные обороты");
+      if (postType !== "promo") {
+        expect(userMessage.content).toContain("Каждый пункт характеристик");
+      }
       expect(userMessage.content).toContain("Длина поста: не более 1200 символов");
       expect(userMessage.content).toContain("Лимит: не более 1200 символов");
       expect(userMessage.content).toContain(`Соцсеть публикации: ${platformLabel}`);

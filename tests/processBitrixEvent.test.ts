@@ -336,7 +336,7 @@ describe("processBitrixEvent", () => {
     expect(db.messages[0].role).toBe("photo");
   });
 
-  it("keeps Telegram follow links intact when a photo caption is shortened", async () => {
+  it("omits the Telegram channel link when a photo caption is shortened", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
     const footer = [
@@ -380,7 +380,7 @@ describe("processBitrixEvent", () => {
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_SOCIAL_CAPTION_TARGET);
     expect(caption).toContain("https://t.me/MagazinSvarnoy");
     expect(caption).toContain("— MAX: https://max.ru/id4025424601_biz");
-    expect(caption).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(caption).not.toContain("— Telegram: https://t.me/svarnoymagazin");
     expect(caption).toContain("— ВК: https://vk.com/svarnoy40");
   });
 
