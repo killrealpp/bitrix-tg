@@ -160,7 +160,7 @@ describe("server", () => {
       db,
       telegram,
       textFit: {
-        aiFit: async (request) => {
+        aiPrepare: async (request) => {
           aiCalls.push(request);
           return "AI fitted Telegram text";
         }

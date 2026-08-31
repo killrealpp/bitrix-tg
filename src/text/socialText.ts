@@ -5,7 +5,11 @@ import {
   truncateAtWord,
   type TextFitOptions
 } from "./fitText";
-import { sanitizeSocialPostText } from "./socialFooter";
+import {
+  buildEventFooter,
+  removeEventFooter,
+  sanitizeSocialPostText
+} from "./socialFooter";
 import type { SocialTextPlatform } from "./socialPlatforms";
 
 export const SOCIAL_AI_TARGET = 1200;
@@ -26,7 +30,7 @@ export async function prepareSocialText(
   const target = getSocialPrepareTarget(event, platform);
 
   if (!shouldUseAiPrompt(event.postType) || !options.aiPrepare) {
-    return formatted;
+    return finalizePreparedSocialText(event, formatted, target, platform, publicationKind);
   }
 
   try {
@@ -48,12 +52,8 @@ export async function prepareSocialText(
       platform
     ).trim();
 
-    if (prepared.length > 0 && prepared.length <= target) {
-      return prepared;
-    }
-
-    if (prepared.length > target) {
-      return truncatePreparedSocialText(prepared, target, platform, publicationKind);
+    if (prepared.length > 0) {
+      return finalizePreparedSocialText(event, prepared, target, platform, publicationKind);
     }
 
     await notifyAiPrepareFailure(
@@ -67,10 +67,50 @@ export async function prepareSocialText(
     // Deterministic formatting keeps publication available if AI is unavailable.
   }
 
-  return sanitizeSocialPostText(
-    truncatePreparedSocialText(formatted, target, platform, publicationKind),
-    platform
+  return finalizePreparedSocialText(event, formatted, target, platform, publicationKind);
+}
+
+export function ensureEventFooter(
+  text: string,
+  platform: SocialTextPlatform,
+  target: number,
+  publicationKind: "text" | "caption"
+): string {
+  const footer = buildEventFooter(platform);
+  const separator = "\n\n";
+  const bodyTarget = target - footer.length - separator.length;
+  const body = removeEventFooter(sanitizeSocialPostText(text, platform));
+
+  if (!body) {
+    return footer.length <= target
+      ? footer
+      : truncatePreparedSocialText(footer, target, platform, publicationKind);
+  }
+
+  const fittedBody = truncatePreparedSocialText(
+    body,
+    Math.max(1, bodyTarget),
+    platform,
+    publicationKind
   );
+  return `${fittedBody}${separator}${footer}`;
+}
+
+function finalizePreparedSocialText(
+  event: ParsedBitrixEvent,
+  text: string,
+  target: number,
+  platform: SocialTextPlatform,
+  publicationKind: "text" | "caption"
+): string {
+  const sanitized = sanitizeSocialPostText(text, platform).trim();
+  if (event.postType === "event") {
+    return ensureEventFooter(sanitized, platform, target, publicationKind);
+  }
+
+  return sanitized.length <= target
+    ? sanitized
+    : truncatePreparedSocialText(sanitized, target, platform, publicationKind);
 }
 
 function truncatePreparedSocialText(

@@ -51,6 +51,7 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 - [x] (2026-08-05 08:55+03:00) Split SMM preparation by platform: Telegram and MAX now use separate prompt slots for `promo`, `company_news`, `event`, and `product_new`; scheduled posts persist per-platform prepared text in SQLite while `prepared_text` remains a legacy fallback.
 - [x] (2026-08-13 10:55+03:00) Added Telegram media-aware SMM preparation: Telegram posts with photos now use caption-specific prompt rules and a 950-character preparation target, while Telegram text-only posts and MAX keep the normal 1200-character SMM target. Deterministic caption truncation now preserves the CTA and fixed "Следите за нами" block when present.
 - [x] (2026-08-19 13:26+03:00) Updated Telegram/MAX SMM rules: each platform footer omits its own channel link, all non-promo types receive more purposeful emoji/list formatting, paragraphs use real blank lines, and generic phrases about "importance for clients" are prohibited. A runtime sanitizer also removes the current-platform follow link and literal backslashes before line breaks from AI output and legacy scheduled text before publication.
+- [x] (2026-08-31 22:13+03:00) Made the ending of every `event` post deterministic: it now always contains the client-approved event-question CTA, a direct dialogue link for the destination platform, and follow links to the other social networks. The scheduler applies the same ending to events that were prepared before this change.
 - [ ] Confirm final production Telegram chat configuration after the test-channel E2E run.
 - [x] (2026-06-04 12:51+03:00) Validate core Telegram publishing and text editing flows against a real Telegram test chat.
 - [x] (2026-06-04 13:20+03:00) Complete real Telegram validation for complex media edit flows in the configured test channel; production still needs to confirm whether `soft` is acceptable or `rebuild` should be enabled.
@@ -139,6 +140,9 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
 
 - Observation: Scheduled posts can retain an older platform-specific text in `prepared_texts_json`.
   Evidence: The scheduler reads the persisted prepared text rather than rebuilding it, so updating an AI prompt alone would not remove obsolete self-channel footer links from posts that were already scheduled. Publication therefore sanitizes both new AI output and stored platform text.
+
+- Observation: A static prompt does not guarantee that an AI response will keep its required footer.
+  Evidence: The MAX `event` prompt already described the dialogue and social-link blocks, but the client found published event posts without them. The service now removes any generated event footer and appends the required platform-specific footer after AI preparation and immediately before scheduled publication.
 
 ## Decision Log
 
@@ -326,6 +330,10 @@ The behavior is visible end to end: send a sample webhook with `active: "Y"` and
   Rationale: The client requested clearer scannability for characteristics, advantages and other lists, while still keeping posts professional. Real blank lines prevent broken paragraph rendering; direct, concrete wording avoids statements such as "это важно для клиентов".
   Date/Author: 2026-08-19 / User
 
+- Decision: Use a dedicated event CTA and enforce it in code, rather than relying only on the AI prompt.
+  Rationale: Every event post must end with “Если остались вопросы по событию, мы на связи. Будем рады ответить на ваши вопросы.”, a link to the dialogue in its destination platform, and the two cross-network links. This preserves the no-self-link rule and covers both new and previously scheduled posts.
+  Date/Author: 2026-08-31 / User
+
 ## Outcomes & Retrospective
 
 The first application scaffold is complete. The project now has a TypeScript/Fastify service, config loading, Bitrix webhook parser, text fitting helpers, Telegram Bot API client interface and implementation, SQLite gateway with migration, posting orchestrator, scheduled publishing worker, sample webhook, and tests. Verification on 2026-06-04 at 13:05+03:00: `npm test` passed 28 tests in 6 files, and `npm run build` passed. The dev server has already been checked on `http://127.0.0.1:18080` from an ignored local `.env`; `/health` returned `OK`. Real Telegram validation against the test channel succeeded earlier: text post `message_id=33`, photo post `message_id=35`, and media group `message_id=36,37` were published; repeat payloads returned `unchanged`; the text update edited `message_id=33` instead of creating a duplicate. The current code additionally supports Bitrix activity-start aliases, Bitrix localized date parsing, uppercase Bitrix text fields, HTML/plain-text normalization, and fake-Telegram coverage for soft media edits.
@@ -371,6 +379,8 @@ Additional verification on 2026-08-05 at 08:55+03:00: targeted prompt/orchestrat
 Additional verification on 2026-08-13 at 10:55+03:00: targeted text/OpenRouter/orchestration/scheduler tests passed 94 tests in 5 files; the full `npm test -- --run` passed 184 tests in 15 files; `npm run build` passed. New coverage proves Telegram photo/album posts send `publicationKind: "caption"`, `hasPhotos: true`, and target 950 to AI preparation; Telegram posts without photos and MAX posts keep the 1200 target; caption-specific prompts remove the 1200-character rule and include instructions to keep CTA and social links intact; deterministic caption truncation preserves the Telegram CTA and MAX/Telegram/VK follow links.
 
 Additional verification on 2026-08-19 at 13:28+03:00: the full `npm test -- --run` passed 195 tests in 16 files, and `npm run build` passed. New coverage proves Telegram prompts and text never retain the Telegram channel follow link, MAX prompts and text never retain the MAX channel follow link, caption truncation preserves the remaining footer links, a literal backslash before a line break is removed, and the revised emoji, paragraph, and direct-address instructions reach OpenRouter.
+
+Additional verification on 2026-08-31 at 22:13+03:00: the full `npm test` passed 199 tests in 16 files, and `npm run build` passed. New coverage proves every event receives the dedicated event CTA and platform-appropriate dialogue/social links after AI preparation, Telegram photo captions preserve the footer inside the 950-character target, and scheduled event rows prepared before the change receive the same mandatory ending at publication time.
 
 ## Context and Orientation
 

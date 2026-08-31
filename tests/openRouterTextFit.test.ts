@@ -234,6 +234,13 @@ describe("OpenRouterTextFitter", () => {
       );
       expect(userMessage.content).toContain(marker);
       expect(userMessage.content).toContain(cta);
+      if (postType === "event") {
+        expect(userMessage.content).toContain(
+          "Если остались вопросы по событию, мы на связи."
+        );
+        expect(userMessage.content).toContain("Не пропускай блок связи по событию");
+        expect(userMessage.content).not.toContain("Для заказа и бесплатной консультации");
+      }
       expect(userMessage.content).toContain("📌 Следите за нами:");
       expect(userMessage.content).toContain(
         platform === "telegram"

@@ -30,7 +30,11 @@ describe("prepareSocialText", () => {
         }
       );
 
-      expect(text).toBe(`AI ${postType} post`);
+      if (postType === "event") {
+        expect(text).toContain(`AI ${postType} post`);
+      } else {
+        expect(text).toBe(`AI ${postType} post`);
+      }
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         bitrixId: 1,
@@ -129,6 +133,62 @@ describe("prepareSocialText", () => {
         target: 1200
       })
     ]);
+  });
+
+  it.each([
+    [
+      "telegram",
+      "https://t.me/MagazinSvarnoy",
+      "— MAX: https://max.ru/id4025424601_biz"
+    ],
+    [
+      "max",
+      "https://max.ru/u/f9LHodD0cOKwuy14X3baQ2X3SDJPP2jeQ0E0_eAMmRoPvBvYzK4BqRoj3hs",
+      "— Telegram: https://t.me/svarnoymagazin"
+    ]
+  ] as const)(
+    "always appends the required event contact and social links for %s",
+    async (platform, dialogLink, socialLink) => {
+      const text = await prepareSocialText(
+        eventWithPostType("event"),
+        "Weldex 2026",
+        platform,
+        {
+          aiPrepare: async () =>
+            [
+              "📅 Weldex 2026",
+              "Выставка пройдет в Москве с 6 по 9 октября.",
+              "👉 Для заказа и бесплатной консультации: https://example.com/old",
+              "📌 Следите за нами:",
+              "— Telegram: https://t.me/svarnoymagazin"
+            ].join("\n")
+        }
+      );
+
+      expect(text).toContain("Если остались вопросы по событию, мы на связи.");
+      expect(text).toContain(dialogLink);
+      expect(text).toContain("📌 Следите за нами:");
+      expect(text).toContain(socialLink);
+      expect(text).toContain("— ВК: https://vk.com/svarnoy40");
+      expect(text).not.toContain("Для заказа и бесплатной консультации");
+    }
+  );
+
+  it("keeps the mandatory event footer when a Telegram photo caption is shortened", async () => {
+    const text = await prepareSocialText(
+      eventWithPostType("event", true),
+      "Weldex 2026",
+      "telegram",
+      {
+        aiPrepare: async () => "Подробности о мероприятии. ".repeat(200)
+      }
+    );
+
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_SOCIAL_CAPTION_TARGET);
+    expect(text).toContain("Если остались вопросы по событию, мы на связи.");
+    expect(text).toContain("https://t.me/MagazinSvarnoy");
+    expect(text).toContain("— MAX: https://max.ru/id4025424601_biz");
+    expect(text).toContain("— ВК: https://vk.com/svarnoy40");
   });
 
   it("preserves the required footer when overlong Telegram photo AI output is truncated", async () => {

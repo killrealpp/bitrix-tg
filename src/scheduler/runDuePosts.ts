@@ -18,6 +18,11 @@ import {
   type TextFitOptions
 } from "../text/fitText";
 import { sanitizeSocialPostText } from "../text/socialFooter";
+import {
+  ensureEventFooter,
+  SOCIAL_AI_TARGET,
+  TELEGRAM_SOCIAL_CAPTION_TARGET
+} from "../text/socialText";
 import type { SocialTextPlatform } from "../text/socialPlatforms";
 import { redactSensitiveText } from "../security/redaction";
 import type {
@@ -192,6 +197,23 @@ function storedPlatformText(
   return text ? sanitizeSocialPostText(text, platform) : null;
 }
 
+function prepareStoredSocialText(
+  post: StoredBitrixPost,
+  text: string,
+  platform: SocialTextPlatform
+): string {
+  if (post.postType !== "event") {
+    return text;
+  }
+
+  const publicationKind =
+    platform === "telegram" && post.photos.length > 0 ? "caption" : "text";
+  const target =
+    publicationKind === "caption" ? TELEGRAM_SOCIAL_CAPTION_TARGET : SOCIAL_AI_TARGET;
+
+  return ensureEventFooter(text, platform, target, publicationKind);
+}
+
 async function resolveStoredPostPhotos(
   post: StoredBitrixPost,
   photoResolver?: BitrixPhotoResolver
@@ -222,9 +244,16 @@ async function publishStoredPostToTargets(
   telegramText: string | null;
   telegramMessages: TelegramMessageRef[];
 }> {
-  const telegramSourceText =
-    storedPlatformText(post, "telegram") ?? post.sourceText;
-  const maxSourceText = storedPlatformText(post, "max") ?? post.sourceText;
+  const telegramSourceText = prepareStoredSocialText(
+    post,
+    storedPlatformText(post, "telegram") ?? post.sourceText,
+    "telegram"
+  );
+  const maxSourceText = prepareStoredSocialText(
+    post,
+    storedPlatformText(post, "max") ?? post.sourceText,
+    "max"
+  );
   let telegramKind: PublicationKind | null = null;
   let telegramText: string | null = null;
   let telegramMessages: TelegramMessageRef[] = [];

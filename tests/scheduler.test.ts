@@ -145,6 +145,50 @@ describe("scheduled publishing", () => {
     ]);
   });
 
+  it("adds event contact and social links to legacy scheduled Telegram and MAX text", async () => {
+    const db = new FakeDbGateway();
+    const telegram = new FakeTelegramClient();
+    const max = new FakeExternalPublisher("max");
+    await db.createPost({
+      bitrixId: 32,
+      status: "scheduled",
+      scheduledAt: new Date("2026-06-04T13:00:00.000Z"),
+      sourceText: "Событие",
+      preparedTexts: {
+        telegram: "📅 Событие в Москве",
+        max: "📅 Событие в Москве"
+      },
+      postType: "event",
+      publishTargets: {
+        telegram: true,
+        vk: false,
+        max: true
+      },
+      photos: [],
+      payloadHash: "event-hash"
+    });
+
+    const result = await runDuePosts({
+      db,
+      telegram,
+      externalPublishers: { max },
+      now: new Date("2026-06-04T13:00:00.000Z")
+    });
+
+    expect(result).toEqual({ checked: 1, published: 1, failed: 0 });
+    expect(telegram.calls[0].input).toMatchObject({
+      text: expect.stringContaining("https://t.me/MagazinSvarnoy")
+    });
+    expect(telegram.calls[0].input).toMatchObject({
+      text: expect.stringContaining("— MAX: https://max.ru/id4025424601_biz")
+    });
+    expect(max.publishCalls[0].text).toContain(
+      "https://max.ru/u/f9LHodD0cOKwuy14X3baQ2X3SDJPP2jeQ0E0_eAMmRoPvBvYzK4BqRoj3hs"
+    );
+    expect(max.publishCalls[0].text).toContain("— Telegram: https://t.me/svarnoymagazin");
+    expect(max.publishCalls[0].text).toContain("— ВК: https://vk.com/svarnoy40");
+  });
+
   it("does not duplicate Telegram when scheduled MAX fails and retries", async () => {
     const db = new FakeDbGateway();
     const telegram = new FakeTelegramClient();
